@@ -188,11 +188,36 @@ def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     
     
 if __name__ == "__main__":
+    from src.load import load_data
+
     data = load_data()
     df = build_modeling_table(data)
-    
-    print(f"Shapee: {df.shape[0]} rows x {df.shape[1]} cols")
+
+    print(f"Shape: {df.shape[0]:,} rows x {df.shape[1]} cols")
     print(f"Columns: {df.columns.tolist()}")
     print()
 
-    
+    # Verify: no duplicate (season, episode, castaway_id)
+    dupes = df.duplicated(subset=["season", "episode", "castaway_id"]).sum()
+    print(f"Duplicate (season, episode, castaway_id) rows: {dupes}")
+
+    # Verify: eliminations per episode
+    elim_per_ep = df.groupby(["season", "episode"])["eliminated_this_episode"].sum()
+    print(f"Eliminations per episode — mean: {elim_per_ep.mean():.2f}, "
+          f"min: {elim_per_ep.min()}, max: {elim_per_ep.max()}")
+    print(f"Episodes with 0 eliminations: {(elim_per_ep == 0).sum()}")
+    print(f"Episodes with 1 elimination: {(elim_per_ep == 1).sum()}")
+    print(f"Episodes with 2+ eliminations: {(elim_per_ep >= 2).sum()}")
+
+    # Verify: static features
+    print(f"\nAge — null: {df['age'].isna().sum()}, mean: {df['age'].mean():.1f}")
+    print(f"Gender — null: {df['gender'].isna().sum()}")
+    print(df["gender"].value_counts())
+
+    # Verify: vote features
+    print(f"\nVotes against (cumulative by prev ep) — mean: {df['votes_against_cumulative_by_previous_ep'].mean():.2f}, "
+          f"max: {df['votes_against_cumulative_by_previous_ep'].max()}")
+
+    print(f"\nSample rows (season 20, episode 1):")
+    print(df[(df["season"] == 20) & (df["episode"] == 1)].to_string())
+
