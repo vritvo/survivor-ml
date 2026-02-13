@@ -55,6 +55,25 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     
     return skel
     
+def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Add time-invariant player features:
+    
+    - age: from Castaways (age at time of playing that season)
+    - gender: from Castaway Details (one row per unique castaway across all seasons)
+    """
+    castaways = data["Castaways"]
+    details = data["Castaway Details"]
+    df = skel.copy()
+
+    # Age: join from Castaways on (season, castaway_id) since age varies per season
+    age_lookup = castaways[castaways["version"] == "US"][["season", "castaway_id", "age"]].drop_duplicates()
+    df = df.merge(age_lookup, on=["season", "castaway_id"], how="left")
+
+    # Gender: join from Castaway Details on castaway_id
+    gender_lookup = details[["castaway_id", "gender"]].drop_duplicates()
+    df = df.merge(gender_lookup, on="castaway_id", how="left")
+
+    return df
     
 #TODO: Add each feature group function
     
