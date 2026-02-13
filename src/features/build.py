@@ -80,7 +80,7 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     """#TODO: Add cumulative vote features.
 
     feature ideas:
-    - votes_against_cumulative: total votes received against this player so far
+    - [x] votes_against_cumulative: total votes received against this player so far
     - times_in_danger: episodes where player received at least one vote
     - correct_votes_cumulative: times player voted for the person who went home
     - correct_votes_recent: correct votes in the last 3 episodes (momentum)
@@ -91,7 +91,35 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     - group by (season, castaway_id),
     - compute cumulative sums up to episode - 1.
     """
-    return skel.copy()
+    
+    votes = data["Vote History"]
+    
+    # limit to US: 
+    votes = votes[votes["version"] == "US"]
+    df = skel.copy()
+    
+    # vote_id = who the vote was cast AGAINST (the target)
+    # voted_out_id = who actually went home (the result)
+    # We want votes received, so group by vote_id
+    
+    votes_clean = votes.dropna(subset=["vote_id"])  # drop rows with no vote cast (e.g. lost-vote advantage)
+    votes_per_ep = votes_clean.groupby(["season", "episode", "vote_id"])["vote_id"].count().rename("num_votes").reset_index()
+    votes_per_ep = votes_per_ep.rename(columns={"vote_id": "castaway_id"})
+
+    # Merge per-episode vote counts onto skeleton (which has ALL episodes for each player)
+    # This way episodes where a player received 0 votes get NaN → fill with 0
+    df = df.merge(votes_per_ep, on=["season", "episode", "castaway_id"], how="left")
+    df["num_votes"] = df["num_votes"].fillna(0).astype(int)
+
+    # Now cumsum + shift on the full episode grid — no gaps
+    df["votes_against_cumulative"] = df.groupby(["season", "castaway_id"])["num_votes"].cumsum()
+    df["votes_against_cumulative_by_previous_ep"] = (
+        df.groupby(["season", "castaway_id"])["votes_against_cumulative"].shift(1, fill_value=0).astype(int)
+    )
+    df = df.drop(columns=["num_votes", "votes_against_cumulative"])
+
+
+    return df
 
 
 def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
