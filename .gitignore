@@ -10,3 +10,6 @@ content/.ipynb_checkpoints/
 
 # Virtual environments
 .venv
+
+# Data 
+data/
