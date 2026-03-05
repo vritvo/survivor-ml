@@ -103,6 +103,9 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
         personality_lookup.drop(columns="personality_type"),
         on="castaway_id", how="left",
     )
+    
+    # Interaction effects: 
+    df["age_x_episode"] = df["age"] * df["episode"]
 
     return df
     
