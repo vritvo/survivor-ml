@@ -95,6 +95,10 @@ def predict_and_evaluate(
     preds = test[["season", "episode", "castaway_id", "castaway", TARGET_COL]].copy()
     preds["prob_eliminated"] = probs
 
+    # Normalize within each episode so probabilities sum to 1
+    episode_sums = preds.groupby(["season", "episode"])["prob_eliminated"].transform("sum")
+    preds["prob_eliminated"] = preds["prob_eliminated"] / episode_sums
+
     # --- Episode-level accuracy ---
     # For each episode, did the player with the highest predicted probability
     # actually get eliminated?
