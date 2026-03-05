@@ -137,21 +137,54 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     # We want votes received, so group by vote_id
     
     votes_clean = votes.dropna(subset=["vote_id"])  # drop rows with no vote cast (e.g. lost-vote advantage)
-    votes_per_ep = votes_clean.groupby(["season", "episode", "vote_id"])["vote_id"].count().rename("num_votes").reset_index()
-    votes_per_ep = votes_per_ep.rename(columns={"vote_id": "castaway_id"})
 
-    # Merge per-episode vote counts onto skeleton (which has ALL episodes for each player)
-    # This way episodes where a player received 0 votes get NaN → fill with 0
+    # Votes received (against this player)
+    votes_per_ep = (
+        votes_clean.groupby(["season", "episode", "vote_id"])
+        .size()
+        .rename("num_votes_received")
+        .reset_index()
+        .rename(columns={"vote_id": "castaway_id"})
+    )
+
     df = df.merge(votes_per_ep, on=["season", "episode", "castaway_id"], how="left")
-    df["num_votes"] = df["num_votes"].fillna(0).astype(int)
+    df["num_votes_received"] = df["num_votes_received"].fillna(0).astype(int)
 
-    # Now cumsum + shift on the full episode grid — no gaps
-    df["votes_against_cumulative"] = df.groupby(["season", "castaway_id"])["num_votes"].cumsum()
+    # Cumulative votes against (shifted to exclude current episode)
+    df["votes_against_cumulative"] = df.groupby(["season", "castaway_id"])["num_votes_received"].cumsum()
     df["votes_against_cumulative_by_previous_ep"] = (
         df.groupby(["season", "castaway_id"])["votes_against_cumulative"].shift(1, fill_value=0).astype(int)
     )
-    df = df.drop(columns=["num_votes", "votes_against_cumulative"])
 
+    # Votes against in last 3 episodes (shifted, then rolling sum)
+    shifted_votes = df.groupby(["season", "castaway_id"])["num_votes_received"].shift(1, fill_value=0)
+    df["votes_against_last_3_eps"] = (
+        shifted_votes.groupby([df["season"], df["castaway_id"]])
+        .transform(lambda x: x.rolling(3, min_periods=1).sum())
+        .astype(int)
+    )
+
+    df = df.drop(columns=["num_votes_received", "votes_against_cumulative"])
+
+    # Correct votes (player voted for the person who went home):
+    votes_with_correct = votes_clean.copy()
+    votes_with_correct["is_correct"] = (votes_with_correct["vote_id"] == votes_with_correct["voted_out_id"]).astype(int)
+    correct_per_ep = (
+        votes_with_correct.groupby(["season", "episode", "castaway_id"])["is_correct"]
+        .sum()
+        .rename("correct_votes_ep")
+        .reset_index()
+    )
+
+    df = df.merge(correct_per_ep, on=["season", "episode", "castaway_id"], how="left")
+    df["correct_votes_ep"] = df["correct_votes_ep"].fillna(0).astype(int)
+
+    df["_correct_cumulative"] = df.groupby(["season", "castaway_id"])["correct_votes_ep"].cumsum()
+    df["correct_votes_cumulative_by_previous_ep"] = (
+        df.groupby(["season", "castaway_id"])["_correct_cumulative"].shift(1, fill_value=0).astype(int)
+    )
+
+    df = df.drop(columns=["correct_votes_ep", "_correct_cumulative"])
 
     return df
 
