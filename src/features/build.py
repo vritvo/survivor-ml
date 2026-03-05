@@ -1,5 +1,6 @@
 """Build the core modeling table: one row per (season, episode, player still in game)."""
 
+
 import pandas as pd
 from src.load import load_data 
 
@@ -53,6 +54,12 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
          "order", "final_n", "eliminated_this_episode"]
     ].reset_index(drop=True)
     
+    # One hot encode tribe_status:
+    skel = pd.get_dummies(skel, columns=["tribe_status"], drop_first=True)
+    
+    # Print the columns starting with "tribe_status_":
+    print(f"Tribe status columns: {skel.columns[skel.columns.str.startswith('tribe_status_')]}")
+    
     return skel
     
 def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -72,6 +79,10 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     # Gender: join from Castaway Details on castaway_id
     gender_lookup = details[["castaway_id", "gender"]].drop_duplicates()
     df = df.merge(gender_lookup, on="castaway_id", how="left")
+
+    df["gender"] = df["gender"].fillna("Unknown") # If any gender is missing, set to "Unknown":
+    df = pd.get_dummies(df, columns=["gender"], drop_first=True) # One hot encode gender:
+
 
     return df
     
@@ -188,7 +199,6 @@ def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     
     
 if __name__ == "__main__":
-    from src.load import load_data
 
     data = load_data()
     df = build_modeling_table(data)
@@ -211,8 +221,9 @@ if __name__ == "__main__":
 
     # Verify: static features
     print(f"\nAge — null: {df['age'].isna().sum()}, mean: {df['age'].mean():.1f}")
-    print(f"Gender — null: {df['gender'].isna().sum()}")
-    print(df["gender"].value_counts())
+    # print(f"Gender — null: {df['gender'].isna().sum()}")
+    print(f"Gender Male: {df['gender_Male'].sum()}  ")
+    print(f"Gender Non-binary: {df['gender_Non-binary'].sum()}")
 
     # Verify: vote features
     print(f"\nVotes against (cumulative by prev ep) — mean: {df['votes_against_cumulative_by_previous_ep'].mean():.2f}, "

@@ -16,7 +16,14 @@ from src.features.build import build_modeling_table
 FEATURE_COLS = [
     "episode",
     "age",
+    "gender_Male",
+    "gender_Non-binary",
     "votes_against_cumulative_by_previous_ep",
+    "final_n",
+    "tribe_status_Merged",
+    "tribe_status_Original",
+    "tribe_status_Swapped",
+    "tribe_status_Swapped_2"
 ]
 
 TARGET_COL = "eliminated_this_episode"
