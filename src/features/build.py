@@ -57,9 +57,6 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     # One hot encode tribe_status:
     skel = pd.get_dummies(skel, columns=["tribe_status"], drop_first=True)
     
-    # Print the columns starting with "tribe_status_":
-    print(f"Tribe status columns: {skel.columns[skel.columns.str.startswith('tribe_status_')]}")
-    
     return skel
     
 def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -83,6 +80,29 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     df["gender"] = df["gender"].fillna("Unknown") # If any gender is missing, set to "Unknown":
     df = pd.get_dummies(df, columns=["gender"], drop_first=True) # One hot encode gender:
 
+    # Is Returnee & Number of previous seasons: binary indicator, if theyve been in a previous season: 
+    appearances = castaways[castaways["version"] == "US"][["season", "castaway_id"]].drop_duplicates()
+    appearances["season_rank"] = appearances.groupby("castaway_id")["season"].rank(method="dense")
+    appearances["is_returnee"] = (appearances["season_rank"] > 1).astype(int)
+    appearances["num_previous_seasons"] = (appearances['season_rank'] - 1).astype(int)
+    df = df.merge(appearances[["season", "castaway_id", "is_returnee", "num_previous_seasons"]], on=["season", "castaway_id"], how="left")
+    
+    # Personality type: split MBTI into 4 binary dimensions rather than 16 one-hot columns
+    # E vs I (E = extravert, I = introvert)
+    # N vs S (N = intuitive, S = sensing)
+    # F vs T (F = feeling, T = thinking)
+    # P vs J (P = perceiving, J = judging)
+    personality_lookup = details[["castaway_id", "personality_type"]].drop_duplicates()
+    personality_lookup["personality_missing"] = personality_lookup["personality_type"].isna().astype(int)
+    personality_lookup["mbti_extravert"] = (personality_lookup["personality_type"].str[0] == "E").astype(int)
+    personality_lookup["mbti_intuitive"] = (personality_lookup["personality_type"].str[1] == "N").astype(int)
+    personality_lookup["mbti_feeling"] = (personality_lookup["personality_type"].str[2] == "F").astype(int)
+    personality_lookup["mbti_perceiving"] = (personality_lookup["personality_type"].str[3] == "P").astype(int)
+
+    df = df.merge(
+        personality_lookup.drop(columns="personality_type"),
+        on="castaway_id", how="left",
+    )
 
     return df
     
