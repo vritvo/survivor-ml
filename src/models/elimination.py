@@ -171,11 +171,11 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     print(f"Episode accuracy: {results['episode_accuracy']:.1%} (model) | {results['baseline_accuracy']:.1%} (baseline)  ({results['n_test_episodes']} episodes)")
     print(f"Brier score:      {results['brier_score']:.4f} (model) | {results['baseline_brier']:.4f} (baseline)")
 
-    # Feature coefficients (ranked by absolute value)
+    # Feature importance (logistic regression coefficients, ranked strongest to weakest)
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
-    coef_tuples.sort(key=lambda x: abs(x[1]), reverse=True)
+    coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
     print(f"\nFeature coefficients (ordered by absolute value):")
-    for name, coef in coef_tuples:
+    for name, coef in coef_tuples_sorted:
         print(f"  {name:45s} {coef:+.4f}")
 
     return results
