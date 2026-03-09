@@ -35,6 +35,7 @@ FEATURE_COLS = [
     "tribe_status_Swapped",
     "tribe_status_Swapped_2",
     "advantages_held",
+    "individual_immunity_wins",
     # "has_advantage",
     # "confessional_share_last_ep",
 ]

@@ -207,21 +207,41 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
 
 
 def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """#TODO: Add cumulative challenge features.
+    """Add cumulative challenge features.
 
-    feature ideas:
-    - individual_immunity_wins: cumulative individual immunity challenge wins
-    - tribe_challenge_wins: cumulative tribal challenge wins
-    - tribe_challenge_losses: cumulative tribal challenge losses
-    - sit_outs: number of times player sat out of a challenge
-
-    Also: 
-    - Use Challenge Results table. 
-    - Filter by challenge_type and result columns.
-    - Same leakage constraint: only episodes < current episode.
     """
-    return skel.copy()
+    cr = data["Challenge Results"]
+    cr = cr[cr["version"] == "US"]
+    df = skel.copy()
 
+    # Individual immunity wins per episode
+    indiv_imm = cr[
+        cr["challenge_type"].isin(["Immunity", "Immunity and Reward"])
+        & (cr["outcome_type"] == "Individual")
+        & (cr["result"] == "Won")
+    ]
+    wins_per_ep = (
+        indiv_imm.groupby(["season", "episode", "castaway_id"])
+        .size()
+        .rename("imm_wins_ep")
+        .reset_index()
+    )
+
+    df = df.merge(wins_per_ep, on=["season", "episode", "castaway_id"], how="left")
+    df["imm_wins_ep"] = df["imm_wins_ep"].fillna(0).astype(int)
+
+    df = df.sort_values(["season", "castaway_id", "episode"]).reset_index(drop=True)
+
+    df["_imm_wins_cumulative"] = df.groupby(["season", "castaway_id"])["imm_wins_ep"].cumsum()
+    df["individual_immunity_wins"] = (
+        df.groupby(["season", "castaway_id"])["_imm_wins_cumulative"]
+        .shift(1, fill_value=0)
+        .astype(int)
+    )
+
+    df = df.drop(columns=["imm_wins_ep", "_imm_wins_cumulative"])
+
+    return df
 
 def add_confessional_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Add confessional / screen time features.
