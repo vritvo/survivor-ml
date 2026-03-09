@@ -2,7 +2,9 @@
 
 import warnings
 import pandas as pd
-from src.features.build import _build_holding_periods
+import pytest
+from src.features.build import _build_holding_periods, build_modeling_table
+from src.load import load_data
 
 
 def _make_events(rows: list[tuple]) -> pd.DataFrame:
@@ -70,3 +72,46 @@ class TestBuildHoldingPeriods:
 
         assert len(result) == 1
         assert result.iloc[0]["end_ep"] == 5
+
+
+# --- Invariant tests on the full pipeline output ---
+
+@pytest.fixture(scope="module")
+def modeling_table():
+    """Load real data and build the full modeling table once for all invariant tests."""
+    data = load_data()
+    return build_modeling_table(data)
+
+
+class TestPipelineInvariants:
+
+    def test_no_duplicate_rows(self, modeling_table):
+        dupes = modeling_table.duplicated(subset=["season", "episode", "castaway_id"]).sum()
+        assert dupes == 0
+
+    def test_cumulative_votes_never_decrease(self, modeling_table):
+        col = "votes_against_cumulative_by_previous_ep"
+        for _, group in modeling_table.groupby(["season", "castaway_id"]):
+            vals = group.sort_values("episode")[col].values
+            assert all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1))
+
+    def test_correct_votes_never_decrease(self, modeling_table):
+        col = "correct_votes_cumulative_by_previous_ep"
+        for _, group in modeling_table.groupby(["season", "castaway_id"]):
+            vals = group.sort_values("episode")[col].values
+            assert all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1))
+
+    def test_cumulative_votes_start_at_zero(self, modeling_table):
+        """Every player's first episode in a season should have 0 cumulative votes."""
+        first_eps = modeling_table.sort_values("episode").groupby(["season", "castaway_id"]).first()
+        assert (first_eps["votes_against_cumulative_by_previous_ep"] == 0).all()
+        assert (first_eps["correct_votes_cumulative_by_previous_ep"] == 0).all()
+
+    def test_has_advantage_is_binary(self, modeling_table):
+        assert modeling_table["has_advantage"].isin([0, 1]).all()
+
+    def test_advantages_held_non_negative(self, modeling_table):
+        assert (modeling_table["advantages_held"] >= 0).all()
+
+    def test_target_has_no_nulls(self, modeling_table):
+        assert modeling_table["eliminated_this_episode"].isna().sum() == 0
