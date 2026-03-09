@@ -125,19 +125,11 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     
 
 def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """#TODO: Add cumulative vote features.
-
-    feature ideas:
-    - [x] votes_against_cumulative: total votes received against this player so far
-    - times_in_danger: episodes where player received at least one vote
-    - correct_votes_cumulative: times player voted for the person who went home
-    - correct_votes_recent: correct votes in the last 3 episodes (momentum)
-    - votes_against_recent: votes in the last 3 episodes (momentum)
-
-    Also: 
-    - no future leakage, use vote history table, 
-    - group by (season, castaway_id),
-    - compute cumulative sums up to episode - 1.
+    """
+    Calculates: 
+    - votes_against_cumulative_by_previous_ep
+    - votes_against_last_3_eps
+    - correct_votes_cumulative_by_previous_ep
     """
     
     votes = data["Vote History"]
@@ -181,7 +173,14 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
         .astype(int)
     )
 
-    df = df.drop(columns=["num_votes_received", "votes_against_cumulative"])
+    # Times in danger: episodes where player received at least 1 vote (cumulative, shifted)
+    df["_in_danger"] = (df["num_votes_received"] > 0).astype(int)
+    df["_in_danger_cum"] = df.groupby(["season", "castaway_id"])["_in_danger"].cumsum()
+    df["times_in_danger"] = (
+        df.groupby(["season", "castaway_id"])["_in_danger_cum"].shift(1, fill_value=0).astype(int)
+    )
+
+    df = df.drop(columns=["num_votes_received", "votes_against_cumulative", "_in_danger", "_in_danger_cum"])
 
     # Correct votes (player voted for the person who went home):
     votes_with_correct = votes_clean.copy()

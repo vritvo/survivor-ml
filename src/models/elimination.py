@@ -29,6 +29,7 @@ FEATURE_COLS = [
     "votes_against_cumulative_by_previous_ep",
     "votes_against_last_3_eps", 
     "correct_votes_cumulative_by_previous_ep",
+    # "times_in_danger",
     #"final_n",
     "tribe_status_Merged",
     "tribe_status_Original",
