@@ -33,7 +33,9 @@ FEATURE_COLS = [
     "tribe_status_Merged",
     "tribe_status_Original",
     "tribe_status_Swapped",
-    "tribe_status_Swapped_2"
+    "tribe_status_Swapped_2",
+    "advantages_held",
+    "has_advantage",
 ]
 
 TARGET_COL = "eliminated_this_episode"

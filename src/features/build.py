@@ -1,8 +1,22 @@
 """Build the core modeling table: one row per (season, episode, player still in game)."""
 
 
+import warnings
 import pandas as pd
 from src.load import load_data 
+
+
+# Advantage event classifications — used by _build_holding_periods
+_GAIN_EVENTS = {"Found", "Found (beware)", "Received", "Recieved"}
+_LOSS_EVENTS = {
+    "Played", "Voted out with advantage", "Expired",
+    "Left game with advantage", "Medically evacuated with advantage",
+    "Quit with advantage", "Destroyed", "Discarded",
+}
+_NEUTRAL_EVENTS = {
+    "Activated", "Banked", "Became hidden immunity idol",
+    "Became steal a vote", "Absorbed",
+}
 
 
 
@@ -221,20 +235,97 @@ def add_confessional_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame])
     return skel.copy()
 
 
-def add_advantage_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """#TODO: Add advantage/idol features.
+def _build_holding_periods(advantage_events: pd.DataFrame) -> pd.DataFrame:
+    """For each advantage in a season, walk through events to determine who holds it and when.
 
-    feature ideas:
-    - idols_found_cumulative: number of hidden immunity idols found
-    - idols_played_cumulative: number of idols played
-    - advantages_held: count of advantages currently held (found - played)
+    Returns a DataFrame with columns:
+        season, advantage_id, castaway_id, start_ep, end_ep
 
-    Also: 
-    - Use Advantage Movement table (events: found, played, etc.) joined with
-    Advantage Details for advantage type.
-    - Filter by episode < current episode.
+    Each row represents one continuous holding period. The holder has the advantage
+    during episodes [start_ep, end_ep] inclusive.
+
+    Handles transfers (Received closes the previous holder's period),
+    beware advantages (second gain by same player is a no-op), and
+    unknown future event types (warned, treated as neutral).
     """
-    return skel.copy()
+    known = _GAIN_EVENTS | _LOSS_EVENTS | _NEUTRAL_EVENTS
+    unknown = set(advantage_events["event"].unique()) - known
+    if unknown:
+        warnings.warn(f"Unknown advantage events (treated as neutral): {unknown}")
+
+    periods: list[dict] = []
+
+    for (season, adv_id), group in advantage_events.groupby(["season", "advantage_id"]):
+        group = group.sort_values("episode")
+        current_holder = None
+        start_ep = None
+
+        for _, row in group.iterrows():
+            if row["event"] in _GAIN_EVENTS:
+                if current_holder is not None and current_holder != row["castaway_id"]:
+                    periods.append({
+                        "season": season, "advantage_id": adv_id,
+                        "castaway_id": current_holder,
+                        "start_ep": start_ep, "end_ep": row["episode"],
+                    })
+                    
+                # If the current holder is not the same as the new holder, update the current holder and start episode
+                if current_holder != row["castaway_id"]:
+                    current_holder = row["castaway_id"]
+                    start_ep = row["episode"]
+
+            elif row["event"] in _LOSS_EVENTS:
+                if current_holder is not None:
+                    periods.append({
+                        "season": season, "advantage_id": adv_id,
+                        "castaway_id": current_holder,
+                        "start_ep": start_ep, "end_ep": row["episode"],
+                    })
+                    current_holder = None
+                    start_ep = None
+
+    return pd.DataFrame(periods)
+
+
+def add_advantage_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Add advantage features: has_advantage (binary) and advantages_held (count).
+
+    Uses _build_holding_periods to track each advantage's lifecycle through
+    gain/loss/transfer events, then counts how many advantages each player holds
+    at each episode.
+    """
+    am = data["Advantage Movement"]
+    us_am = am[am["version"] == "US"].copy()
+    df = skel.copy()
+
+    periods = _build_holding_periods(us_am)
+
+    if periods.empty:
+        df["advantages_held"] = 0
+        df["has_advantage"] = 0
+        return df
+
+    # Expand holding periods to episode-level: for each period, find which skeleton
+    # episodes fall within [start_ep, end_ep]
+    episode_keys = df[["season", "episode", "castaway_id"]].drop_duplicates()
+    holdings = episode_keys.merge(periods, on=["season", "castaway_id"], how="inner")
+    holdings = holdings[
+        (holdings["episode"] >= holdings["start_ep"])
+        & (holdings["episode"] <= holdings["end_ep"])
+    ]
+
+    adv_counts = (
+        holdings.groupby(["season", "episode", "castaway_id"])
+        .size()
+        .rename("advantages_held")
+        .reset_index()
+    )
+
+    df = df.merge(adv_counts, on=["season", "episode", "castaway_id"], how="left")
+    df["advantages_held"] = df["advantages_held"].fillna(0).astype(int)
+    df["has_advantage"] = (df["advantages_held"] > 0).astype(int)
+
+    return df
 
 
 def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
