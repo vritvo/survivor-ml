@@ -95,17 +95,16 @@ class TestPipelineInvariants:
             vals = group.sort_values("episode")[col].values
             assert all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1))
 
-    def test_correct_votes_never_decrease(self, modeling_table):
-        col = "correct_votes_cumulative_by_previous_ep"
-        for _, group in modeling_table.groupby(["season", "castaway_id"]):
-            vals = group.sort_values("episode")[col].values
-            assert all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1))
+    def test_correct_vote_pct_bounded(self, modeling_table):
+        """correct_vote_pct should be between 0 and 1."""
+        assert (modeling_table["correct_vote_pct"] >= 0).all()
+        assert (modeling_table["correct_vote_pct"] <= 1).all()
 
     def test_cumulative_votes_start_at_zero(self, modeling_table):
-        """Every player's first episode in a season should have 0 cumulative votes."""
+        """Every player's first episode in a season should have 0 cumulative votes and 0 pct."""
         first_eps = modeling_table.sort_values("episode").groupby(["season", "castaway_id"]).first()
         assert (first_eps["votes_against_cumulative_by_previous_ep"] == 0).all()
-        assert (first_eps["correct_votes_cumulative_by_previous_ep"] == 0).all()
+        assert (first_eps["correct_vote_pct"] == 0).all()
 
     def test_has_advantage_is_binary(self, modeling_table):
         assert modeling_table["has_advantage"].isin([0, 1]).all()
