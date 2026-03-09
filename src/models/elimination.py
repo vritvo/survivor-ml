@@ -35,7 +35,8 @@ FEATURE_COLS = [
     "tribe_status_Swapped",
     "tribe_status_Swapped_2",
     "advantages_held",
-    "has_advantage",
+    # "has_advantage",
+    # "confessional_share_last_ep",
 ]
 
 TARGET_COL = "eliminated_this_episode"
@@ -80,7 +81,9 @@ def train_model(train: pd.DataFrame) -> tuple[LogisticRegression, StandardScaler
     X_train = scaler.fit_transform(train[FEATURE_COLS])
     y_train = train[TARGET_COL]
 
-    model = LogisticRegression(max_iter=1000)
+    model = LogisticRegression(l1_ratio=.5, solver="saga", max_iter=5000, C=1)
+    
+    
     model.fit(X_train, y_train)
 
     return model, scaler
@@ -167,11 +170,11 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     print(f"Episode accuracy: {results['episode_accuracy']:.1%} (model) | {results['baseline_accuracy']:.1%} (baseline)  ({results['n_test_episodes']} episodes)")
     print(f"Brier score:      {results['brier_score']:.4f} (model) | {results['baseline_brier']:.4f} (baseline)")
 
-    # Feature importance (logistic regression coefficients, ranked strongest to weakest)
+    # Feature coefficients (ranked by absolute value)
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
-    coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
+    coef_tuples.sort(key=lambda x: abs(x[1]), reverse=True)
     print(f"\nFeature coefficients (ordered by absolute value):")
-    for name, coef in coef_tuples_sorted:
+    for name, coef in coef_tuples:
         print(f"  {name:45s} {coef:+.4f}")
 
     return results

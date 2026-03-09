@@ -224,18 +224,35 @@ def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) ->
 
 
 def add_confessional_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """#TODO: Add confessional / screen time features.
+    """Add confessional / screen time features.
 
     feature ideas:
     - confessionals_cumulative: total confessional count up to previous episode
     - confessionals_last_3_eps: confessionals in the last 3 episodes (momentum)
-    - confessional_share: player's share of total confessionals that episode
-
-    Also: 
-    - Use Confessionals table (one row per player per episode with confessional_count).
-    - Filter by episode < current episode.
+    - [x] confessional_share_last_ep: player's share of total confessionals in previous episode
     """
-    return skel.copy()
+    conf = data["Confessionals"]
+    conf = conf[conf["version"] == "US"]
+    df = skel.copy()
+
+    # Compute each player's share of confessionals per episode
+    ep_totals = conf.groupby(["season", "episode"])["confessional_count"].transform("sum")
+    conf_share = conf[["season", "episode", "castaway_id"]].copy()
+    conf_share["confessional_share"] = conf["confessional_count"] / ep_totals
+
+    df = df.merge(conf_share, on=["season", "episode", "castaway_id"], how="left")
+    df["confessional_share"] = df["confessional_share"].fillna(0)
+
+    df = df.sort_values(["season", "castaway_id", "episode"]).reset_index(drop=True)
+
+    df["confessional_share_last_ep"] = (
+        df.groupby(["season", "castaway_id"])["confessional_share"]
+        .shift(1, fill_value=0)
+    )
+
+    df = df.drop(columns=["confessional_share"])
+
+    return df
 
 
 def _build_holding_periods(advantage_events: pd.DataFrame) -> pd.DataFrame:
