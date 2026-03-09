@@ -164,6 +164,9 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     df = df.merge(votes_per_ep, on=["season", "episode", "castaway_id"], how="left")
     df["num_votes_received"] = df["num_votes_received"].fillna(0).astype(int)
 
+    # Sort by episode so cumsum/shift/rolling operate in chronological order
+    df = df.sort_values(["season", "castaway_id", "episode"]).reset_index(drop=True)
+
     # Cumulative votes against (shifted to exclude current episode)
     df["votes_against_cumulative"] = df.groupby(["season", "castaway_id"])["num_votes_received"].cumsum()
     df["votes_against_cumulative_by_previous_ep"] = (
