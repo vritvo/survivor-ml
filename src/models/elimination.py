@@ -9,6 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss
 from src.load import load_data
 from src.features.build import build_modeling_table
+from src.evaluate import expanding_window_cv
 
 # --- Configuration ---
 
@@ -156,6 +157,12 @@ def predict_and_evaluate(
 
 # --- Full pipeline ---
 
+def _train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+    """Train on train_df, evaluate on test_df. Used as callback for CV."""
+    model, scaler = train_model(train_df)
+    return predict_and_evaluate(model, scaler, test_df)
+
+
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
     """Run the full pipeline: preprocess → split → train → evaluate."""
     df = preprocess(df)
@@ -182,8 +189,35 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     return results
 
 
+def cross_validate(df: pd.DataFrame) -> dict:
+    """Run expanding-window cross-validation and print results."""
+    df = preprocess(df)
+
+    print(f"Features: {FEATURE_COLS}")
+    print(f"Running expanding-window CV...\n")
+
+    cv_results = expanding_window_cv(df, _train_and_evaluate)
+
+    for fold in cv_results["folds"]:
+        print(f"  Train {fold['fold_train_seasons']:>5s} | Test {fold['fold_test_seasons']:>5s} | "
+              f"Accuracy: {fold['episode_accuracy']:.1%} (baseline {fold['baseline_accuracy']:.1%}) | "
+              f"Episodes: {fold['n_test_episodes']}")
+
+    mean = cv_results["mean"]
+    print(f"\n  Mean accuracy: {mean['episode_accuracy']:.1%} (baseline {mean['baseline_accuracy']:.1%}) "
+          f"over {cv_results['n_folds']} folds")
+    print(f"  Mean Brier:    {mean['brier_score']:.4f} (baseline {mean['baseline_brier']:.4f})")
+
+    return cv_results
+
+
 if __name__ == "__main__":
 
     data = load_data()
     df = build_modeling_table(data)
+
+    print("=== Single split ===\n")
     results = train_eval_pipeline(df)
+
+    print("\n\n=== Cross-validation ===\n")
+    cv_results = cross_validate(df)
