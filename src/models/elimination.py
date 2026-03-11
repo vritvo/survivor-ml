@@ -1,7 +1,12 @@
 """
 Model(elimination): predict who gets voted out each episode.
+
+Usage:
+    python -m src.models.elimination           # train & evaluate (single split + CV)
+    python -m src.models.elimination --tune    # hyperparameter grid search
 """
 
+import argparse
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -75,7 +80,11 @@ def split_by_season(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 # --- Training ---
 
-def train_model(train: pd.DataFrame) -> tuple[LogisticRegression, StandardScaler]:
+def train_model(
+    train: pd.DataFrame,
+    C: float = 1.0,
+    l1_ratio: float = 0.5,
+) -> tuple[LogisticRegression, StandardScaler]:
     """Train a logistic regression on the training set.
 
     Returns the fitted model and scaler (needed to transform test data the same way).
@@ -84,9 +93,9 @@ def train_model(train: pd.DataFrame) -> tuple[LogisticRegression, StandardScaler
     X_train = scaler.fit_transform(train[FEATURE_COLS])
     y_train = train[TARGET_COL]
 
-    model = LogisticRegression(l1_ratio=.5, solver="saga", max_iter=5000, C=1)
-    
-    
+    model = LogisticRegression(
+        l1_ratio=l1_ratio, C=C, solver="saga", max_iter=5000,
+    )
     model.fit(X_train, y_train)
 
     return model, scaler
@@ -157,10 +166,12 @@ def predict_and_evaluate(
 
 # --- Full pipeline ---
 
-def _train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
-    """Train on train_df, evaluate on test_df. Used as callback for CV."""
-    model, scaler = train_model(train_df)
-    return predict_and_evaluate(model, scaler, test_df)
+def _make_train_and_evaluate(**kwargs):
+    """Create a train-and-evaluate callback. Passes kwargs to train_model."""
+    def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+        model, scaler = train_model(train_df, **kwargs)
+        return predict_and_evaluate(model, scaler, test_df)
+    return fn
 
 
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
@@ -179,7 +190,6 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     print(f"Episode accuracy: {results['episode_accuracy']:.1%} (model) | {results['baseline_accuracy']:.1%} (baseline)  ({results['n_test_episodes']} episodes)")
     print(f"Brier score:      {results['brier_score']:.4f} (model) | {results['baseline_brier']:.4f} (baseline)")
 
-    # Feature importance (logistic regression coefficients, ranked strongest to weakest)
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
     coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
     print(f"\nFeature coefficients (ordered by absolute value):")
@@ -196,7 +206,8 @@ def cross_validate(df: pd.DataFrame) -> dict:
     print(f"Features: {FEATURE_COLS}")
     print(f"Running expanding-window CV...\n")
 
-    cv_results = expanding_window_cv(df, _train_and_evaluate)
+    cv_results = expanding_window_cv(df, _make_train_and_evaluate())
+
 
     for fold in cv_results["folds"]:
         print(f"  Train {fold['fold_train_seasons']:>5s} | Test {fold['fold_test_seasons']:>5s} | "
@@ -211,13 +222,49 @@ def cross_validate(df: pd.DataFrame) -> dict:
     return cv_results
 
 
+def tune_hyperparameters(df: pd.DataFrame) -> tuple[float, float]:
+    """Grid search over C and l1_ratio using expanding-window CV.
+
+    Returns (best_C, best_l1_ratio).
+    """
+    df = preprocess(df)
+
+    C_values = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
+    l1_ratios = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+    print(f"Tuning over {len(C_values)} x {len(l1_ratios)} = {len(C_values) * len(l1_ratios)} combos\n")
+
+    results = []
+    for C in C_values:
+        for l1 in l1_ratios:
+            cv = expanding_window_cv(df, _make_train_and_evaluate(C=C, l1_ratio=l1))
+            mean_acc = cv["mean"]["episode_accuracy"]
+            mean_brier = cv["mean"]["brier_score"]
+            results.append({"C": C, "l1_ratio": l1, "accuracy": mean_acc, "brier": mean_brier})
+            print(f"  C={C:<6} l1_ratio={l1:<5} → accuracy={mean_acc:.1%}  brier={mean_brier:.4f}")
+
+    results_sorted = sorted(results, key=lambda r: r["accuracy"], reverse=True)
+    best = results_sorted[0]
+    print(f"\nBest: C={best['C']}, l1_ratio={best['l1_ratio']} "
+          f"→ accuracy={best['accuracy']:.1%}, brier={best['brier']:.4f}")
+
+    return best["C"], best["l1_ratio"]
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tune", action="store_true", help="Run hyperparameter grid search")
+    args = parser.parse_args()
 
     data = load_data()
     df = build_modeling_table(data)
 
-    print("=== Single split ===\n")
-    results = train_eval_pipeline(df)
+    if args.tune:
+        print("=== Hyperparameter tuning ===\n")
+        tune_hyperparameters(df)
+    else:
+        print("=== Single split ===\n")
+        results = train_eval_pipeline(df)
 
-    print("\n\n=== Cross-validation ===\n")
-    cv_results = cross_validate(df)
+        print("\n\n=== Cross-validation ===\n")
+        cv_results = cross_validate(df)
