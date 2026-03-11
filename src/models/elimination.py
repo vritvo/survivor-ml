@@ -2,8 +2,9 @@
 Model(elimination): predict who gets voted out each episode.
 
 Usage:
-    python -m src.models.elimination           # train & evaluate (single split + CV)
-    python -m src.models.elimination --tune    # hyperparameter grid search
+    python -m src.models.elimination                  # train & evaluate (single split + CV)
+    python -m src.models.elimination --tune           # hyperparameter grid search
+    python -m src.models.elimination --select         # forward feature selection
 """
 
 import argparse
@@ -14,33 +15,33 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss
 from src.load import load_data
 from src.features.build import build_modeling_table
-from src.evaluate import expanding_window_cv
+from src.evaluate import expanding_window_cv, forward_selection
 
 # --- Configuration ---
 
 # Features the model uses.
 FEATURE_COLS = [
-    "episode",
+    # "episode",
     "age",
-    "age_x_episode",
-    "gender_Male",
-    "gender_Non-binary",
-    "personality_missing",
+    # "age_x_episode",
+    # "gender_Male",
+    # "gender_Non-binary",
+    # "personality_missing",
     # "mbti_extravert",
     # "mbti_intuitive",
-    # "mbti_feeling",
+    "mbti_feeling",
     # "mbti_perceiving",
-    "is_returnee",
-    #"num_previous_seasons",
-    "votes_against_cumulative_by_previous_ep",
+    # "is_returnee",
+    "num_previous_seasons",
+    # "votes_against_cumulative_by_previous_ep",
     "votes_against_last_3_eps", 
-    "correct_votes_cumulative_by_previous_ep",
+    # "correct_votes_cumulative_by_previous_ep",
     # "times_in_danger",
-    #"final_n",
-    "tribe_status_Merged",
-    "tribe_status_Original",
-    "tribe_status_Swapped",
-    "tribe_status_Swapped_2",
+    # "final_n",
+    # "tribe_status_Merged",
+    # "tribe_status_Original",
+    # "tribe_status_Swapped",
+    # "tribe_status_Swapped_2",
     "advantages_held",
     "individual_immunity_wins",
     # "has_advantage",
@@ -84,13 +85,15 @@ def train_model(
     train: pd.DataFrame,
     C: float = 1.0,
     l1_ratio: float = 0.5,
+    feature_cols: list[str] | None = None,
 ) -> tuple[LogisticRegression, StandardScaler]:
     """Train a logistic regression on the training set.
 
     Returns the fitted model and scaler (needed to transform test data the same way).
     """
+    features = feature_cols or FEATURE_COLS
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(train[FEATURE_COLS])
+    X_train = scaler.fit_transform(train[features])
     y_train = train[TARGET_COL]
 
     model = LogisticRegression(
@@ -107,6 +110,7 @@ def predict_and_evaluate(
     model: LogisticRegression,
     scaler: StandardScaler,
     test: pd.DataFrame,
+    feature_cols: list[str] | None = None,
 ) -> dict:
     """Generate predictions and compute metrics on the test set.
 
@@ -115,7 +119,8 @@ def predict_and_evaluate(
     - brier_score: calibration of predicted probabilities (lower = better)
     - predictions: DataFrame with per-player probabilities for inspection
     """
-    X_test = scaler.transform(test[FEATURE_COLS])
+    features = feature_cols or FEATURE_COLS
+    X_test = scaler.transform(test[features])
     probs = model.predict_proba(X_test)[:, 1]  # P(eliminated)
 
     # Build predictions DataFrame for per-episode evaluation
@@ -129,14 +134,17 @@ def predict_and_evaluate(
     # --- Episode-level accuracy ---
     # For each episode, did the player with the highest predicted probability
     # actually get eliminated?
+    # Break ties randomly to avoid data-ordering artifacts.
     # TODO: think about how to handle episodes with 2+ eliminations —
     # currently we count it as correct if our top pick was any of the eliminated players.
+    rng = np.random.default_rng(42)
     correct = 0
     total = 0
     for (_season, _episode), group in preds.groupby(["season", "episode"]):
         if group[TARGET_COL].sum() == 0:
             continue  # skip no-elimination episodes
-        top_pick = group.loc[group["prob_eliminated"].idxmax(), "castaway_id"]
+        probs_with_noise = group["prob_eliminated"] + rng.uniform(0, 1e-10, len(group))
+        top_pick = group.loc[probs_with_noise.idxmax(), "castaway_id"]
         actually_eliminated = group.loc[group[TARGET_COL] == 1, "castaway_id"].values
         if top_pick in actually_eliminated:
             correct += 1
@@ -166,11 +174,11 @@ def predict_and_evaluate(
 
 # --- Full pipeline ---
 
-def _make_train_and_evaluate(**kwargs):
+def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
     """Create a train-and-evaluate callback. Passes kwargs to train_model."""
     def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
-        model, scaler = train_model(train_df, **kwargs)
-        return predict_and_evaluate(model, scaler, test_df)
+        model, scaler = train_model(train_df, feature_cols=feature_cols, **kwargs)
+        return predict_and_evaluate(model, scaler, test_df, feature_cols=feature_cols)
     return fn
 
 
@@ -251,9 +259,30 @@ def tune_hyperparameters(df: pd.DataFrame) -> tuple[float, float]:
     return best["C"], best["l1_ratio"]
 
 
+def run_forward_selection(df: pd.DataFrame) -> dict:
+    """Run forward feature selection and print results."""
+    df = preprocess(df)
+
+    def make_cv_callback(features: list[str]):
+        return _make_train_and_evaluate(feature_cols=features)
+
+    print(f"Candidates: {FEATURE_COLS}\n")
+    results = forward_selection(df, FEATURE_COLS, make_cv_callback)
+
+    print(f"\nSelected {len(results['selected_features'])} features "
+          f"(from {len(FEATURE_COLS)} candidates):")
+    for f in results["selected_features"]:
+        print(f"  - {f}")
+    print(f"\nBest CV accuracy: {results['best_score']:.1%}")
+
+    return results
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tune", action="store_true", help="Run hyperparameter grid search")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--tune", action="store_true", help="Run hyperparameter grid search")
+    group.add_argument("--select", action="store_true", help="Run forward feature selection")
     args = parser.parse_args()
 
     data = load_data()
@@ -262,6 +291,9 @@ if __name__ == "__main__":
     if args.tune:
         print("=== Hyperparameter tuning ===\n")
         tune_hyperparameters(df)
+    elif args.select:
+        print("=== Forward feature selection ===\n")
+        run_forward_selection(df)
     else:
         print("=== Single split ===\n")
         results = train_eval_pipeline(df)

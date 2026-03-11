@@ -1,4 +1,4 @@
-"""Shared evaluation utilities: temporal cross-validation over seasons."""
+"""Shared evaluation utilities: temporal cross-validation and feature selection."""
 
 import pandas as pd
 import numpy as np
@@ -65,4 +65,74 @@ def expanding_window_cv(
         "folds": fold_results,
         "mean": averages,
         "n_folds": len(fold_results),
+    }
+
+
+def forward_selection(
+    df: pd.DataFrame,
+    candidate_features: list[str],
+    make_cv_callback: Callable[[list[str]], Callable],
+    metric: str = "episode_accuracy",
+    **cv_kwargs,
+) -> dict:
+    """Greedy forward feature selection using expanding-window CV.
+
+    Starts with no features, adds the one that improves the metric most,
+    repeats until no feature improves performance.
+
+    Args:
+        df: Preprocessed modeling table.
+        candidate_features: All features to consider.
+        make_cv_callback: Factory that takes a list of feature names and returns
+            a (train_df, test_df) -> dict callback for CV.
+        metric: Key in the CV results dict to optimize (default: episode_accuracy).
+        **cv_kwargs: Passed to expanding_window_cv.
+
+    Returns:
+        Dict with selected features, history of each step, and best score.
+    """
+    selected: list[str] = []
+    remaining = list(candidate_features)
+    history: list[dict] = []
+    best_score = -np.inf
+
+    step = 0
+    while remaining:
+        step += 1
+        step_results = []
+
+        for feature in remaining:
+            trial_features = selected + [feature]
+            callback = make_cv_callback(trial_features)
+            cv = expanding_window_cv(df, callback, **cv_kwargs)
+            score = cv["mean"][metric]
+            step_results.append({"feature": feature, "score": score})
+
+        step_results.sort(key=lambda r: r["score"], reverse=True)
+        best_candidate = step_results[0]
+
+        if best_candidate["score"] <= best_score:
+            print(f"\n  Step {step}: no improvement (best candidate "
+                  f"{best_candidate['feature']} → {best_candidate['score']:.1%}, "
+                  f"current best {best_score:.1%}). Stopping.")
+            break
+
+        selected.append(best_candidate["feature"])
+        remaining.remove(best_candidate["feature"])
+        best_score = best_candidate["score"]
+
+        history.append({
+            "step": step,
+            "added": best_candidate["feature"],
+            "score": best_score,
+            "all_candidates": step_results,
+        })
+
+        print(f"  Step {step}: +{best_candidate['feature']:45s} → {best_score:.1%}  "
+              f"({len(remaining)} remaining)")
+
+    return {
+        "selected_features": selected,
+        "best_score": best_score,
+        "history": history,
     }
