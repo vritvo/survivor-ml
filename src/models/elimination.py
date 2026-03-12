@@ -16,10 +16,10 @@ from sklearn.metrics import brier_score_loss
 from src.load import load_data
 from src.features.build import build_modeling_table
 from src.evaluate import expanding_window_cv, forward_selection
+from src.models.utils import preprocess, split_by_season
 
 # --- Configuration ---
 
-# Features the model uses.
 FEATURE_COLS = [
     # "episode",
     "age",
@@ -50,54 +50,30 @@ FEATURE_COLS = [
 
 TARGET_COL = "eliminated_this_episode"
 
-# Temporal split: train on seasons 1-40, test on 41-50
 TRAIN_SEASONS = range(1, 41)
 TEST_SEASONS = range(41, 51)
 
-
-# --- Preprocessing ---
-
-def preprocess(df: pd.DataFrame) -> pd.DataFrame:
-    """Prepare the modeling table for sklearn.
-
-    - Drop rows with missing features
-    """
-    df = df.copy()
-
-    # Drop rows where any feature is missing 
-    df = df.dropna(subset=FEATURE_COLS)
-
-    return df
-
-
-# --- Train/test split ---
-
-def split_by_season(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split into train/test by season (temporal split, no leakage)."""
-    train = df[df["season"].isin(TRAIN_SEASONS)]
-    test = df[df["season"].isin(TEST_SEASONS)]
-    return train, test
+# Hyperparameters (update after running --tune)
+C = 5
+L1_RATIO = .5
 
 
 # --- Training ---
 
 def train_model(
     train: pd.DataFrame,
-    C: float = 1.0,
-    l1_ratio: float = 0.5,
+    C: float = C,
+    l1_ratio: float = L1_RATIO,
     feature_cols: list[str] | None = None,
 ) -> tuple[LogisticRegression, StandardScaler]:
-    """Train a logistic regression on the training set.
-
-    Returns the fitted model and scaler (needed to transform test data the same way).
-    """
+    """Train elastic net logistic regression (saga solver)."""
     features = feature_cols or FEATURE_COLS
     scaler = StandardScaler()
     X_train = scaler.fit_transform(train[features])
     y_train = train[TARGET_COL]
 
     model = LogisticRegression(
-        l1_ratio=l1_ratio, C=C, solver="saga", max_iter=5000,
+        C=C, l1_ratio=l1_ratio, solver="saga", max_iter=5000,
     )
     model.fit(X_train, y_train)
 
@@ -183,9 +159,9 @@ def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
 
 
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
-    """Run the full pipeline: preprocess → split → train → evaluate."""
-    df = preprocess(df)
-    train, test = split_by_season(df)
+    """Run the full pipeline: preprocess -> split -> train -> evaluate."""
+    df = preprocess(df, FEATURE_COLS)
+    train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
 
     print(f"Train: {len(train):,} rows ({train['season'].nunique()} seasons)")
     print(f"Test:  {len(test):,} rows ({test['season'].nunique()} seasons)")
@@ -209,12 +185,12 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
 
 def cross_validate(df: pd.DataFrame) -> dict:
     """Run expanding-window cross-validation and print results."""
-    df = preprocess(df)
+    df = preprocess(df, FEATURE_COLS)
 
     print(f"Features: {FEATURE_COLS}")
     print(f"Running expanding-window CV...\n")
 
-    cv_results = expanding_window_cv(df, _make_train_and_evaluate())
+    cv_results = expanding_window_cv(df, _make_train_and_evaluate(feature_cols=FEATURE_COLS))
 
 
     for fold in cv_results["folds"]:
@@ -235,7 +211,7 @@ def tune_hyperparameters(df: pd.DataFrame) -> tuple[float, float]:
 
     Returns (best_C, best_l1_ratio).
     """
-    df = preprocess(df)
+    df = preprocess(df, FEATURE_COLS)
 
     C_values = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
     l1_ratios = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -245,7 +221,7 @@ def tune_hyperparameters(df: pd.DataFrame) -> tuple[float, float]:
     results = []
     for C in C_values:
         for l1 in l1_ratios:
-            cv = expanding_window_cv(df, _make_train_and_evaluate(C=C, l1_ratio=l1))
+            cv = expanding_window_cv(df, _make_train_and_evaluate(feature_cols=FEATURE_COLS, C=C, l1_ratio=l1))
             mean_acc = cv["mean"]["episode_accuracy"]
             mean_brier = cv["mean"]["brier_score"]
             results.append({"C": C, "l1_ratio": l1, "accuracy": mean_acc, "brier": mean_brier})
@@ -261,7 +237,7 @@ def tune_hyperparameters(df: pd.DataFrame) -> tuple[float, float]:
 
 def run_forward_selection(df: pd.DataFrame) -> dict:
     """Run forward feature selection and print results."""
-    df = preprocess(df)
+    df = preprocess(df, FEATURE_COLS)
 
     def make_cv_callback(features: list[str]):
         return _make_train_and_evaluate(feature_cols=features)
