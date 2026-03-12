@@ -43,7 +43,7 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     skel = skel.sort_values("order")
     skel = skel.drop_duplicates(subset=["season", "episode", "castaway_id"], keep="first")
 
-    # Build target variable from Castaways table.
+    # Build target variable "eliminated_this_episode" from Castaways table.
     # Castaways.episode = the episode a player was eliminated in.
     # A player who was never voted out (winner, runner-up) has episode = final episode
     # but their result is not "voted out", so we filter to elimination results.
@@ -62,10 +62,15 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     skel["eliminated_this_episode"] = (skel["episode"] == skel["elim_episode"]).astype(int)
     skel = skel.drop(columns=["elim_episode"])
 
+    # Build target variable "won_season" from Castaways table. 
+    won_season = us_castaways[us_castaways["winner"] == 1.0][["season", "castaway_id", "winner"]].rename(columns={"winner": "won_season"})
+    skel = skel.merge(won_season, on=["season", "castaway_id"], how="left")
+    skel["won_season"] = skel["won_season"].fillna(0).astype(int)
+    
     # Keep useful columns from the skeleton
     skel = skel[
         ["season", "episode", "castaway_id", "castaway", "tribe", "tribe_status",
-         "order", "final_n", "eliminated_this_episode"]
+         "order", "final_n", "eliminated_this_episode", "won_season"]
     ].reset_index(drop=True)
     
     # One hot encode tribe_status:
