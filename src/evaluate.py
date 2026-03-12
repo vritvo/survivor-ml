@@ -73,6 +73,7 @@ def forward_selection(
     candidate_features: list[str],
     make_cv_callback: Callable[[list[str]], Callable],
     metric: str = "episode_accuracy",
+    higher_is_better: bool = True,
     **cv_kwargs,
 ) -> dict:
     """Greedy forward feature selection using expanding-window CV.
@@ -86,6 +87,7 @@ def forward_selection(
         make_cv_callback: Factory that takes a list of feature names and returns
             a (train_df, test_df) -> dict callback for CV.
         metric: Key in the CV results dict to optimize (default: episode_accuracy).
+        higher_is_better: If True, maximize the metric. If False, minimize it.
         **cv_kwargs: Passed to expanding_window_cv.
 
     Returns:
@@ -94,7 +96,10 @@ def forward_selection(
     selected: list[str] = []
     remaining = list(candidate_features)
     history: list[dict] = []
-    best_score = -np.inf
+    best_score = -np.inf if higher_is_better else np.inf
+
+    def _is_improvement(new: float, old: float) -> bool:
+        return new > old if higher_is_better else new < old
 
     step = 0
     while remaining:
@@ -108,13 +113,15 @@ def forward_selection(
             score = cv["mean"][metric]
             step_results.append({"feature": feature, "score": score})
 
-        step_results.sort(key=lambda r: r["score"], reverse=True)
+        step_results.sort(key=lambda r: r["score"], reverse=higher_is_better)
         best_candidate = step_results[0]
 
-        if best_candidate["score"] <= best_score:
+        if not _is_improvement(best_candidate["score"], best_score):
+            fmt = f"{best_candidate['score']:.4f}"
+            best_fmt = f"{best_score:.4f}"
             print(f"\n  Step {step}: no improvement (best candidate "
-                  f"{best_candidate['feature']} → {best_candidate['score']:.1%}, "
-                  f"current best {best_score:.1%}). Stopping.")
+                  f"{best_candidate['feature']} -> {fmt}, "
+                  f"current best {best_fmt}). Stopping.")
             break
 
         selected.append(best_candidate["feature"])
@@ -128,7 +135,7 @@ def forward_selection(
             "all_candidates": step_results,
         })
 
-        print(f"  Step {step}: +{best_candidate['feature']:45s} → {best_score:.1%}  "
+        print(f"  Step {step}: +{best_candidate['feature']:45s} -> {best_score:.4f}  "
               f"({len(remaining)} remaining)")
 
     return {
