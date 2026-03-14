@@ -17,43 +17,69 @@ from src.load import load_data
 from src.features.build import build_modeling_table
 from src.evaluate import expanding_window_cv, forward_selection
 from src.models.utils import preprocess, split_by_season
+from src.models.elimination import (
+    train_model as train_elim_model,
+    FEATURE_COLS as ELIM_FEATURE_COLS,
+)
 
 # --- Configuration ---
 
 FEATURE_COLS = [
-#     "episode",
-#     "age",
-     "age_x_episode",
-#     "gender_Male",
-#     "gender_Non-binary",
-#     "personality_missing",
-#     "mbti_extravert",
-#     "mbti_intuitive",
-#     "mbti_feeling",
-#     "mbti_perceiving",
-#     "is_returnee",
+    # "episode",
+    # "age",
+    #  "age_x_episode",
+    # "gender_Male",
+    # "gender_Non-binary",
+    # "personality_missing",
+    # "mbti_extravert",
+    # "mbti_intuitive",
+    # "mbti_feeling",
+    # "mbti_perceiving",
+    # "is_returnee",
     "num_previous_seasons",
-#     "votes_against_cumulative_by_previous_ep",
+    # "votes_against_cumulative_by_previous_ep",
     "votes_against_last_3_eps",
-#     "correct_votes_cumulative_by_previous_ep",
+    # "correct_votes_cumulative_by_previous_ep",
     "times_in_danger",
-#     "final_n",
-#     "tribe_status_Merged",
-#     "tribe_status_Original",
-#     "tribe_status_Swapped",
-#     "tribe_status_Swapped_2",
+    "final_n",
+    # "tribe_status_Merged",
+    # "tribe_status_Original",
+    # "tribe_status_Swapped",
+    # "tribe_status_Swapped_2",
      "advantages_held",
     # "individual_immunity_wins",
-#     "has_advantage",
+    # "has_advantage",
     "confessional_share_last_ep",
- ]
+    "elim_risk",
+]
 
 TARGET_COL = "won_season"
 
 TRAIN_SEASONS = range(1, 41)
 TEST_SEASONS = range(41, 51)
 
-C = .5
+C = 0.5
+
+# All columns that must be non-null before we can generate elim_risk
+_BASE_FEATURES = [f for f in FEATURE_COLS if f != "elim_risk"]
+_ALL_NEEDED = list(set(_BASE_FEATURES) | set(ELIM_FEATURE_COLS))
+
+
+# --- Elimination risk scores ---
+
+def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> pd.DataFrame:
+    """Train elimination model on train_df, add normalized P(eliminated) to predict_df."""
+    elim_model, elim_scaler = train_elim_model(train_df)
+    X = elim_scaler.transform(predict_df[ELIM_FEATURE_COLS])
+    probs = elim_model.predict_proba(X)[:, 1]
+
+    result = predict_df.copy()
+    result["elim_risk"] = probs
+    
+    # Get the sum of elim_risk for each episode, then normalize elim_risk within each episode.
+    ep_sums = result.groupby(["season", "episode"])["elim_risk"].transform("sum")
+    result["elim_risk"] = result["elim_risk"] / ep_sums
+    return result
 
 
 # --- Training ---
@@ -155,17 +181,26 @@ def predict_and_evaluate(
 # --- Full pipeline ---
 
 def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
-    """Create a train-and-evaluate callback. Passes kwargs to train_model."""
+    """Create a train-and-evaluate callback.
+
+    Generates elimination risk scores fresh for each fold, then trains the win model.
+    """
     def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+        # TODO: This includes leakage, isn't perfect but is to get this working for now. 
+        train_df = add_elim_risk(train_df, train_df)
+        test_df = add_elim_risk(train_df, test_df)
         model, scaler = train_model(train_df, feature_cols=feature_cols, **kwargs)
         return predict_and_evaluate(model, scaler, test_df, feature_cols=feature_cols)
     return fn
 
 
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
-    """Run the full pipeline: preprocess -> split -> train -> evaluate."""
-    df = preprocess(df, FEATURE_COLS)
+    """Run the full pipeline: preprocess -> split -> generate risk scores -> train -> evaluate."""
+    df = preprocess(df, _ALL_NEEDED)
     train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
+
+    train = add_elim_risk(train, train)
+    test = add_elim_risk(train, test)
 
     print(f"Train: {len(train):,} rows ({train['season'].nunique()} seasons)")
     print(f"Test:  {len(test):,} rows ({test['season'].nunique()} seasons)")
@@ -192,7 +227,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
 
 def cross_validate(df: pd.DataFrame) -> dict:
     """Run expanding-window cross-validation and print results."""
-    df = preprocess(df, FEATURE_COLS)
+    df = preprocess(df, _ALL_NEEDED)
 
     print(f"Features: {FEATURE_COLS}")
     print(f"Running expanding-window CV...\n")
@@ -219,7 +254,7 @@ def tune_hyperparameters(df: pd.DataFrame) -> float:
 
     Returns best_C.
     """
-    df = preprocess(df, FEATURE_COLS)
+    df = preprocess(df, _ALL_NEEDED)
 
     C_values = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
 
@@ -243,7 +278,7 @@ def tune_hyperparameters(df: pd.DataFrame) -> float:
 
 def run_forward_selection(df: pd.DataFrame) -> dict:
     """Run forward feature selection and print results."""
-    df = preprocess(df, FEATURE_COLS)
+    df = preprocess(df, _ALL_NEEDED)
 
     def make_cv_callback(features: list[str]):
         return _make_train_and_evaluate(feature_cols=features)
