@@ -274,6 +274,20 @@ def add_confessional_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame])
         .shift(1, fill_value=0)
     )
 
+    rolling_mean = df.groupby(["season", "castaway_id"])["confessional_share"].transform(
+        lambda x: x.rolling(3, min_periods=1).mean()
+    )
+    df["confessional_share_rolling_3"] = (
+        rolling_mean.groupby([df["season"], df["castaway_id"]]).shift(1, fill_value=0)
+    )
+
+    expanding_mean = df.groupby(["season", "castaway_id"])["confessional_share"].transform(
+        lambda x: x.expanding(min_periods=1).mean()
+    )
+    df["confessional_share_cumulative"] = (
+        expanding_mean.groupby([df["season"], df["castaway_id"]]).shift(1, fill_value=0)
+    )
+
     df = df.drop(columns=["confessional_share"])
 
     return df
