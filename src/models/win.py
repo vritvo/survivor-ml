@@ -67,6 +67,49 @@ _ALL_NEEDED = list(set(_BASE_FEATURES) | set(ELIM_FEATURE_COLS))
 
 # --- Elimination risk scores ---
 
+def _normalize_elim_risk(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize elim_risk within each episode so scores sum to 1."""
+    ep_sums = df.groupby(["season", "episode"])["elim_risk"].transform("sum")
+    df["elim_risk"] = df["elim_risk"] / ep_sums
+    return df
+
+
+def add_elim_risk_oof(train_df: pd.DataFrame) -> pd.DataFrame:
+    """Generate out-of-fold elimination risk scores using an expanding window.
+
+    For each season S in train_df, trains the elimination model on all
+    seasons prior to S and predicts on S. Season 1 (no prior data) gets
+    uniform 1/N scores. This mirrors real-world deployment and avoids
+    data leakage from in-sample predictions.
+    """
+    result = train_df.copy()
+    result["elim_risk"] = np.nan
+
+    seasons = sorted(train_df["season"].unique())
+
+    for i, season in enumerate(seasons):
+        season_mask = result["season"] == season
+        prior_seasons = seasons[:i]
+
+        # No prior seasons to train on — assign uniform 1/N
+        if not prior_seasons:
+            n_per_ep = result.loc[season_mask].groupby(
+                ["season", "episode"]
+            )["season"].transform("count")
+            result.loc[season_mask, "elim_risk"] = 1.0 / n_per_ep
+            continue
+
+        # Train elim model on seasons 1..S-1, predict on season S
+        prior_data = train_df[train_df["season"].isin(prior_seasons)]
+        elim_model, elim_scaler = train_elim_model(prior_data)
+
+        X = elim_scaler.transform(result.loc[season_mask, ELIM_FEATURE_COLS])
+        probs = elim_model.predict_proba(X)[:, 1]
+        result.loc[season_mask, "elim_risk"] = probs
+
+    return _normalize_elim_risk(result)
+
+
 def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> pd.DataFrame:
     """Train elimination model on train_df, add normalized P(eliminated) to predict_df."""
     elim_model, elim_scaler = train_elim_model(train_df)
@@ -75,11 +118,7 @@ def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> pd.DataFr
 
     result = predict_df.copy()
     result["elim_risk"] = probs
-    
-    # Get the sum of elim_risk for each episode, then normalize elim_risk within each episode.
-    ep_sums = result.groupby(["season", "episode"])["elim_risk"].transform("sum")
-    result["elim_risk"] = result["elim_risk"] / ep_sums
-    return result
+    return _normalize_elim_risk(result)
 
 
 # --- Training ---
@@ -186,8 +225,7 @@ def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
     Generates elimination risk scores fresh for each fold, then trains the win model.
     """
     def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
-        # TODO: This includes leakage, isn't perfect but is to get this working for now. 
-        train_df = add_elim_risk(train_df, train_df)
+        train_df = add_elim_risk_oof(train_df)
         test_df = add_elim_risk(train_df, test_df)
         model, scaler = train_model(train_df, feature_cols=feature_cols, **kwargs)
         return predict_and_evaluate(model, scaler, test_df, feature_cols=feature_cols)
@@ -199,7 +237,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     df = preprocess(df, _ALL_NEEDED)
     train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
 
-    train = add_elim_risk(train, train)
+    train = add_elim_risk_oof(train)
     test = add_elim_risk(train, test)
 
     print(f"Train: {len(train):,} rows ({train['season'].nunique()} seasons)")
