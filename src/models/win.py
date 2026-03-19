@@ -5,6 +5,8 @@ Usage:
     python -m src.models.win                  # train & evaluate (single split + CV)
     python -m src.models.win --tune           # hyperparameter grid search
     python -m src.models.win --select         # forward feature selection
+
+For predicting a specific season, use predict_season(df, target_season) from code/notebook.
 """
 
 import argparse
@@ -406,6 +408,28 @@ def tune_hyperparameters(df: pd.DataFrame) -> float:
           f"-> rank={best['mean_winner_rank']:.2f}, brier={best['brier']:.4f}")
 
     return best["C"]
+
+
+def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
+    """
+    Train on all seasons before target_season, return win predictions for that season. No evaluation.
+    """
+    df = preprocess(df, _ALL_NEEDED)
+    train = df[df["season"] < target_season]
+    target = df[df["season"] == target_season]
+
+    if target.empty:
+        raise ValueError(f"No data found for season {target_season}")
+
+    # Generate elimination risk scores using only prior-season data
+    train = add_elim_risk_oof(train)
+    target = add_elim_risk(train, target)
+
+    print(f"Training on seasons 1-{target_season - 1} ({len(train):,} rows), "
+          f"predicting season {target_season} ({len(target):,} rows)")
+
+    model, scaler = train_model(train)
+    return predict(model, scaler, target)
 
 
 def run_forward_selection(df: pd.DataFrame) -> dict:
