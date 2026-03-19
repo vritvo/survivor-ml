@@ -26,7 +26,7 @@ from src.models.elimination import (
 
 FEATURE_COLS = [
     # "episode",
-    # "age",
+    "age", #
     #  "age_x_episode",
     # "gender_Male",
     # "gender_Non-binary",
@@ -36,21 +36,23 @@ FEATURE_COLS = [
     # "mbti_feeling",
     # "mbti_perceiving",
     # "is_returnee",
-    "num_previous_seasons",
+    "num_previous_seasons", #
     # "votes_against_cumulative_by_previous_ep",
-    "votes_against_last_3_eps",
+    "votes_against_last_3_eps", #
     # "correct_votes_cumulative_by_previous_ep",
-    "times_in_danger",
-    "final_n",
+    "times_in_danger", #
+    "final_n", #
     # "tribe_status_Merged",
     # "tribe_status_Original",
     # "tribe_status_Swapped",
     # "tribe_status_Swapped_2",
-     "advantages_held",
+    #  "advantages_held", # ----
     # "individual_immunity_wins",
     # "has_advantage",
-    "confessional_share_last_ep",
-    "elim_risk",
+    # "confessional_share_last_ep", 
+    "confessional_share_rolling_3",
+    # "confessional_share_cumulative",
+    # "elim_risk",
 ]
 
 TARGET_COL = "won_season"
@@ -152,8 +154,7 @@ def predict_and_evaluate(
 ) -> dict:
     """Generate predictions and compute metrics on the test set.
 
-    TODO: full trajectory evaluation (winner rank over time, top-k accuracy).
-    Currently returns basic metrics for CV compatibility.
+    Returns overall metrics and a predictions DataFrame. 
     """
     features = feature_cols or FEATURE_COLS
     X_test = scaler.transform(test[features])
@@ -215,6 +216,62 @@ def predict_and_evaluate(
         "n_test_episodes": total,
         "predictions": preds,
     }
+
+
+def winner_rank_detail(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Compute the model's rank for the actual winner in each (season, episode).
+
+    Returns one row per episode with winner_rank, baseline_rank, and
+    rank_improvement (positive = model ranked winner higher than random).
+    """
+    rng = np.random.default_rng(42)
+
+    rows = []
+    for (season, episode), group in predictions.groupby(["season", "episode"]):
+        if group[TARGET_COL].sum() == 0:
+            continue
+        # Tiny noise breaks ties randomly instead of by row order
+        noisy_probs = group["prob_win"] + rng.uniform(0, 1e-10, len(group))
+        ranked = group.assign(rank=noisy_probs.rank(ascending=False).astype(int))
+        winner_rank = ranked.loc[ranked[TARGET_COL] == 1, "rank"].values[0]
+        n_players = len(group)
+        rows.append({
+            "season": season,
+            "episode": episode,
+            "winner_rank": winner_rank,
+            "n_players": n_players,
+            "baseline_rank": (n_players + 1) / 2,  # expected rank under random
+            "rank_improvement": (n_players + 1) / 2 - winner_rank,
+            "top1_correct": int(winner_rank == 1),
+            "top3_correct": int(winner_rank <= 3),
+            "baseline_top1": 1 / n_players,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def metrics_by_episode_number(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate winner_rank_detail by episode number.
+
+    Returns one row per episode number with mean accuracy metrics,
+    standard errors, and how many seasons contributed data.
+    """
+    detail = winner_rank_detail(predictions)
+
+    # Average across seasons at each episode number
+    by_episode = detail.groupby("episode").agg(
+        mean_winner_rank=("winner_rank", "mean"),
+        se_winner_rank=("winner_rank", "sem"),
+        mean_baseline_rank=("baseline_rank", "mean"),
+        top1_accuracy=("top1_correct", "mean"),
+        se_top1=("top1_correct", "sem"),
+        top3_accuracy=("top3_correct", "mean"),
+        baseline_top1=("baseline_top1", "mean"),
+        mean_n_players=("n_players", "mean"),
+        n_seasons=("season", "nunique"),
+    ).reset_index()
+
+    return by_episode
 
 
 # --- Full pipeline ---
