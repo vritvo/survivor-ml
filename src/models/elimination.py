@@ -103,6 +103,8 @@ def predict(
     preds = df[id_cols].copy()
     preds["prob_eliminated"] = probs
 
+    # Raw logistic regression outputs don't sum to 1 across players in an episode,
+    # so normalize to get a proper "who goes home" distribution.
     episode_sums = preds.groupby(["season", "episode"])["prob_eliminated"].transform("sum")
     preds["prob_eliminated"] = preds["prob_eliminated"] / episode_sums
 
@@ -142,7 +144,7 @@ def evaluate(predictions: pd.DataFrame) -> dict:
     # --- Brier score ---
     brier = brier_score_loss(preds[TARGET_COL], preds["prob_eliminated"])
 
-    # --- Naive baseline: random guess ---
+    # --- Naive baseline: uniform 1/N probability per player ---
     baseline_accuracy = (1 / preds.groupby(["season", "episode"]).size()).mean()
     baseline_probs = 1 / preds.groupby(["season", "episode"])["season"].transform("count")
     baseline_brier = brier_score_loss(preds[TARGET_COL], baseline_probs)
@@ -179,7 +181,11 @@ def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
 
 
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
-    """Run the full pipeline: preprocess -> split -> train -> evaluate."""
+    """Run the full pipeline: preprocess -> split -> train -> evaluate.
+
+    Single fixed split (TRAIN_SEASONS vs TEST_SEASONS). For a more robust
+    estimate, use cross_validate() which averages over multiple splits.
+    """
     df = preprocess(df, FEATURE_COLS)
     train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
 
@@ -194,6 +200,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     print(f"Episode accuracy: {results['episode_accuracy']:.1%} (model) | {results['baseline_accuracy']:.1%} (baseline)  ({results['n_test_episodes']} episodes)")
     print(f"Brier score:      {results['brier_score']:.4f} (model) | {results['baseline_brier']:.4f} (baseline)")
 
+    # Show which features the model relies on most
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
     coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
     print(f"\nFeature coefficients (ordered by absolute value):")
@@ -204,14 +211,16 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
 
 
 def cross_validate(df: pd.DataFrame) -> dict:
-    """Run expanding-window cross-validation and print results."""
+    """Run expanding-window cross-validation and print results.
+
+    Each fold trains on all seasons up to some cutoff, then tests on the next test_window seasons.
+    """
     df = preprocess(df, FEATURE_COLS)
 
     print(f"Features: {FEATURE_COLS}")
     print(f"Running expanding-window CV...\n")
 
     cv_results = expanding_window_cv(df, _make_train_and_evaluate(feature_cols=FEATURE_COLS))
-
 
     for fold in cv_results["folds"]:
         print(f"  Train {fold['fold_train_seasons']:>5s} | Test {fold['fold_test_seasons']:>5s} | "
@@ -229,7 +238,7 @@ def cross_validate(df: pd.DataFrame) -> dict:
 def tune_hyperparameters(df: pd.DataFrame) -> tuple[float, float]:
     """Grid search over C and l1_ratio using expanding-window CV.
 
-    Returns (best_C, best_l1_ratio).
+    Returns (best_C, best_l1_ratio). Selects by highest episode accuracy.
     """
     df = preprocess(df, FEATURE_COLS)
 

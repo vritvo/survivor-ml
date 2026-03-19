@@ -167,6 +167,7 @@ def predict(
     preds = df[id_cols].copy()
     preds["prob_win"] = probs
 
+    # Normalize so probabilities sum to 1 across players in each episode
     episode_sums = preds.groupby(["season", "episode"])["prob_win"].transform("sum")
     preds["prob_win"] = preds["prob_win"] / episode_sums
 
@@ -182,6 +183,10 @@ def evaluate(predictions: pd.DataFrame) -> dict:
     """
     preds = predictions
 
+    # --- Per-episode winner rank ---
+    # For each episode, rank the actual winner among remaining players by
+    # descending prob_win. Rank 1 = model's top pick, lower is better.
+    # Tiny noise breaks ties randomly instead of by row order.
     rng = np.random.default_rng(42)
     ranks = []
     top1_correct = 0
@@ -207,6 +212,8 @@ def evaluate(predictions: pd.DataFrame) -> dict:
 
     brier = brier_score_loss(preds[TARGET_COL], preds["prob_win"])
 
+    # --- Baseline: random uniform ranking ---
+    # Expected rank under random = (N+1)/2, expected top-1 = 1/N
     episode_sizes = preds.groupby(["season", "episode"]).size()
     baseline_mean_rank = ((episode_sizes + 1) / 2).mean()
     baseline_top1 = (1 / episode_sizes).mean()
@@ -296,9 +303,10 @@ def metrics_by_episode_number(predictions: pd.DataFrame) -> pd.DataFrame:
 # --- Full pipeline ---
 
 def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
-    """Create a train-and-evaluate callback.
+    """Create a train-and-evaluate callback for use with expanding_window_cv.
 
-    Generates elimination risk scores fresh for each fold, then trains the win model.
+    Each fold freshly generates elimination risk scores (out-of-fold for train,
+    in-fold for test) before training the win model, preventing leakage.
     """
     def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
         train_df = add_elim_risk_oof(train_df)
@@ -309,10 +317,16 @@ def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
 
 
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
-    """Run the full pipeline: preprocess -> split -> generate risk scores -> train -> evaluate."""
+    """Run the full pipeline: preprocess -> split -> generate risk scores -> train -> evaluate.
+
+    Single fixed split (TRAIN_SEASONS vs TEST_SEASONS). For a more robust
+    estimate, use cross_validate() which averages over multiple splits.
+    """
     df = preprocess(df, _ALL_NEEDED)
     train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
 
+    # Generate elimination risk as a feature: out-of-fold for train (no leakage),
+    # then train a fresh elim model on all train data to score test.
     train = add_elim_risk_oof(train)
     test = add_elim_risk(train, test)
 
@@ -330,6 +344,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     print(f"Brier score:      {results['brier_score']:.4f} (model) | {results['baseline_brier']:.4f} (baseline)")
     print(f"({results['n_test_episodes']} test episodes)")
 
+    # Show which features the model relies on most
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
     coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
     print(f"\nFeature coefficients (ordered by absolute value):")
@@ -340,7 +355,10 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
 
 
 def cross_validate(df: pd.DataFrame) -> dict:
-    """Run expanding-window cross-validation and print results."""
+    """Run expanding-window cross-validation and print results.
+
+    Each fold trains on all seasons up to some cutoff, then tests on the next test_window seasons.
+    """
     df = preprocess(df, _ALL_NEEDED)
 
     print(f"Features: {FEATURE_COLS}")
@@ -366,7 +384,7 @@ def cross_validate(df: pd.DataFrame) -> dict:
 def tune_hyperparameters(df: pd.DataFrame) -> float:
     """Grid search over C using expanding-window CV.
 
-    Returns best_C.
+    Returns best_C. Selects by lowest mean winner rank (lower = better).
     """
     df = preprocess(df, _ALL_NEEDED)
 
