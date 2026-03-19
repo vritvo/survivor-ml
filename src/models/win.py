@@ -144,32 +144,44 @@ def train_model(
     return model, scaler
 
 
-# --- Evaluation ---
+# --- Prediction ---
 
-def predict_and_evaluate(
+def predict(
     model: LogisticRegression,
     scaler: StandardScaler,
-    test: pd.DataFrame,
+    df: pd.DataFrame,
     feature_cols: list[str] | None = None,
-) -> dict:
-    """Generate predictions and compute metrics on the test set.
+) -> pd.DataFrame:
+    """Generate per-player win probabilities, normalized within each episode.
 
-    Returns overall metrics and a predictions DataFrame. 
+    Works on any DataFrame with the right feature columns — train, test, or a new season.
+    Includes the target column in the output if present in the input.
     """
     features = feature_cols or FEATURE_COLS
-    X_test = scaler.transform(test[features])
-    probs = model.predict_proba(X_test)[:, 1]  # P(won_season)
+    X = scaler.transform(df[features])
+    probs = model.predict_proba(X)[:, 1]  # P(won_season)
 
-    preds = test[["season", "episode", "castaway_id", "castaway", TARGET_COL]].copy()
+    id_cols = ["season", "episode", "castaway_id", "castaway"]
+    if TARGET_COL in df.columns:
+        id_cols.append(TARGET_COL)
+    preds = df[id_cols].copy()
     preds["prob_win"] = probs
 
-    # Normalize within each episode so probabilities sum to 1
     episode_sums = preds.groupby(["season", "episode"])["prob_win"].transform("sum")
     preds["prob_win"] = preds["prob_win"] / episode_sums
 
-    # --- Per-episode winner rank ---
-    # For each episode, rank the actual winner among remaining players.
-    # Rank 1 = model's top pick. Lower is better.
+    return preds
+
+
+# --- Evaluation ---
+
+def evaluate(predictions: pd.DataFrame) -> dict:
+    """Compute winner rank, accuracy, and Brier score from a predictions DataFrame.
+
+    Expects columns: prob_win, won_season.
+    """
+    preds = predictions
+
     rng = np.random.default_rng(42)
     ranks = []
     top1_correct = 0
@@ -179,7 +191,6 @@ def predict_and_evaluate(
     for (_season, _episode), group in preds.groupby(["season", "episode"]):
         if group[TARGET_COL].sum() == 0:
             continue
-        # Rank by descending prob_win (break ties randomly)
         noisy_probs = group["prob_win"] + rng.uniform(0, 1e-10, len(group))
         group = group.assign(rank=noisy_probs.rank(ascending=False).astype(int))
         winner_rank = group.loc[group[TARGET_COL] == 1, "rank"].values[0]
@@ -194,11 +205,8 @@ def predict_and_evaluate(
     top1_accuracy = top1_correct / total if total > 0 else 0
     top3_accuracy = top3_correct / total if total > 0 else 0
 
-    # --- Brier score ---
     brier = brier_score_loss(preds[TARGET_COL], preds["prob_win"])
 
-    # --- Baselines ---
-    # Random guess: winner rank = (N+1)/2 on average
     episode_sizes = preds.groupby(["season", "episode"]).size()
     baseline_mean_rank = ((episode_sizes + 1) / 2).mean()
     baseline_top1 = (1 / episode_sizes).mean()
@@ -216,6 +224,17 @@ def predict_and_evaluate(
         "n_test_episodes": total,
         "predictions": preds,
     }
+
+
+def predict_and_evaluate(
+    model: LogisticRegression,
+    scaler: StandardScaler,
+    test: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+) -> dict:
+    """Generate predictions and compute metrics on the test set."""
+    preds = predict(model, scaler, test, feature_cols)
+    return evaluate(preds)
 
 
 def winner_rank_detail(predictions: pd.DataFrame) -> pd.DataFrame:

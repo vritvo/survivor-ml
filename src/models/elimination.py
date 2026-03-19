@@ -80,32 +80,43 @@ def train_model(
     return model, scaler
 
 
-# --- Evaluation ---
+# --- Prediction ---
 
-def predict_and_evaluate(
+def predict(
     model: LogisticRegression,
     scaler: StandardScaler,
-    test: pd.DataFrame,
+    df: pd.DataFrame,
     feature_cols: list[str] | None = None,
-) -> dict:
-    """Generate predictions and compute metrics on the test set.
+) -> pd.DataFrame:
+    """Generate per-player elimination probabilities, normalized within each episode.
 
-    Returns a dict with:
-    - episode_accuracy: fraction of episodes where argmax prediction = actual boot
-    - brier_score: calibration of predicted probabilities (lower = better)
-    - predictions: DataFrame with per-player probabilities for inspection
+    Works on any DataFrame with the right feature columns — train, test, or a new season.
+    Includes the target column in the output if present in the input.
     """
     features = feature_cols or FEATURE_COLS
-    X_test = scaler.transform(test[features])
-    probs = model.predict_proba(X_test)[:, 1]  # P(eliminated)
+    X = scaler.transform(df[features])
+    probs = model.predict_proba(X)[:, 1]  # P(eliminated)
 
-    # Build predictions DataFrame for per-episode evaluation
-    preds = test[["season", "episode", "castaway_id", "castaway", TARGET_COL]].copy()
+    id_cols = ["season", "episode", "castaway_id", "castaway"]
+    if TARGET_COL in df.columns:
+        id_cols.append(TARGET_COL)
+    preds = df[id_cols].copy()
     preds["prob_eliminated"] = probs
 
-    # Normalize within each episode so probabilities sum to 1
     episode_sums = preds.groupby(["season", "episode"])["prob_eliminated"].transform("sum")
     preds["prob_eliminated"] = preds["prob_eliminated"] / episode_sums
+
+    return preds
+
+
+# --- Evaluation ---
+
+def evaluate(predictions: pd.DataFrame) -> dict:
+    """Compute episode accuracy and Brier score from a predictions DataFrame.
+
+    Expects columns: prob_eliminated, eliminated_this_episode.
+    """
+    preds = predictions
 
     # --- Episode-level accuracy ---
     # For each episode, did the player with the highest predicted probability
@@ -132,9 +143,7 @@ def predict_and_evaluate(
     brier = brier_score_loss(preds[TARGET_COL], preds["prob_eliminated"])
 
     # --- Naive baseline: random guess ---
-    # If you picked a random player each episode, your accuracy = 1/N where N = cast size
     baseline_accuracy = (1 / preds.groupby(["season", "episode"]).size()).mean()
-    # Uniform probabilities: each player gets 1/N in their episode
     baseline_probs = 1 / preds.groupby(["season", "episode"])["season"].transform("count")
     baseline_brier = brier_score_loss(preds[TARGET_COL], baseline_probs)
 
@@ -146,6 +155,17 @@ def predict_and_evaluate(
         "n_test_episodes": total,
         "predictions": preds,
     }
+
+
+def predict_and_evaluate(
+    model: LogisticRegression,
+    scaler: StandardScaler,
+    test: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+) -> dict:
+    """Generate predictions and compute metrics on the test set."""
+    preds = predict(model, scaler, test, feature_cols)
+    return evaluate(preds)
 
 
 # --- Full pipeline ---
