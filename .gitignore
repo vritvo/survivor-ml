@@ -7,12 +7,13 @@ wheels/
 *.egg-info
 .*ipynb_checkpoints/
 content/.ipynb_checkpoints/
+.DS_Store
 
 # Virtual environments
 .venv
 
 # Data 
-data/
+/data/
 content/more_exploration.ipynb
 
 # Notes

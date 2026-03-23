@@ -441,7 +441,7 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     preds = predict(model, scaler, target)
     
     # Save to json: 
-    with open(f"data/seasons/season_{target_season}.json", "w") as f:
+    with open(f"app/public/data/seasons/season_{target_season}.json", "w") as f:
         json.dump(preds.to_dict(orient="records"), f)
         
     # Return the predictions as a DataFrame
