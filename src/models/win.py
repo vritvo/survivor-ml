@@ -5,6 +5,7 @@ Usage:
     python -m src.models.win                  # train & evaluate (single split + CV)
     python -m src.models.win --tune           # hyperparameter grid search
     python -m src.models.win --select         # forward feature selection
+    python -m src.models.win --predict 50     # predict a specific season (e.g. season 50)
 
 For predicting a specific season, use predict_season(df, target_season) from code/notebook.
 """
@@ -12,6 +13,7 @@ For predicting a specific season, use predict_season(df, target_season) from cod
 import argparse
 import pandas as pd
 import numpy as np
+import json
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss
@@ -436,7 +438,14 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
           f"predicting season {target_season} ({len(target):,} rows)")
 
     model, scaler = train_model(train)
-    return predict(model, scaler, target)
+    preds = predict(model, scaler, target)
+    
+    # Save to json: 
+    with open(f"data/seasons/season_{target_season}.json", "w") as f:
+        json.dump(preds.to_dict(orient="records"), f)
+        
+    # Return the predictions as a DataFrame
+    return preds
 
 
 def run_forward_selection(df: pd.DataFrame) -> dict:
@@ -466,6 +475,9 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--tune", action="store_true", help="Run hyperparameter grid search")
     group.add_argument("--select", action="store_true", help="Run forward feature selection")
+    group.add_argument("--predict", type=int, metavar="SEASON",
+                       help="Predict a specific season (train on all prior)")
+    
     args = parser.parse_args()
 
     data = load_data()
@@ -477,6 +489,9 @@ if __name__ == "__main__":
     elif args.select:
         print("=== Forward feature selection ===\n")
         run_forward_selection(df)
+    elif args.predict:
+        print(f"=== Predicting season {args.predict} ===\n")
+        predict_season(df, args.predict)
     else:
         print("=== Single split ===\n")
         results = train_eval_pipeline(df)
