@@ -157,17 +157,24 @@ def predict(
     """Generate per-player win probabilities, normalized within each episode.
 
     Works on any DataFrame with the right feature columns — train, test, or a new season.
-    Includes the target column in the output if present in the input.
     """
     features = feature_cols or FEATURE_COLS
     X = scaler.transform(df[features])
     probs = model.predict_proba(X)[:, 1]  # P(won_season)
 
     id_cols = ["season", "episode", "castaway_id", "castaway"]
-    if TARGET_COL in df.columns:
-        id_cols.append(TARGET_COL)
+    
+    # Carry through elim_risk (as prob_eliminated) and eliminated_this_episode if present.
+    extra_cols = [TARGET_COL, "eliminated_this_episode", "elim_risk"]
+    for col in extra_cols:
+        if col in df.columns and col not in id_cols:
+            id_cols.append(col)
     preds = df[id_cols].copy()
     preds["prob_win"] = probs
+
+    # Rename elim_risk to prob_eliminated if it exists.
+    if "elim_risk" in preds.columns:
+        preds = preds.rename(columns={"elim_risk": "prob_eliminated"})
 
     # Normalize so probabilities sum to 1 across players in each episode
     episode_sums = preds.groupby(["season", "episode"])["prob_win"].transform("sum")
