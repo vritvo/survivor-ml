@@ -1,60 +1,38 @@
 import './style.css'
-import javascriptLogo from './assets/javascript.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import { setupCounter } from './counter.js'
 
+//TODO: Have the season selector automatically populate with seasons /episodes from data/seasons
 document.querySelector('#app').innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${javascriptLogo}" class="framework" alt="JavaScript logo"/>
-    <img src=${viteLogo} class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.js</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+<h1>Survivor ML</h1>
+<div class="season-selector"> 
+<label for="season-selector">Season:</label>
+  <select id="season-selector">
+    <option value="20">Season 20</option>
+    <option value="50" selected>Season 50</option>
+  </select>
+</div>
+<div class="chart-row">
+  <div id="elim-trajectory" class="chart"></div>
+  <div id="win-trajectory" class="chart"></div>
+</div>
+<div class="episode-selector">
+  <label for="episode-selector">Episode:</label>
+  <select id="episode-selector">
+    <option value="1">Episode 1</option>
+    <option value="2" selected>Episode 2</option>
+    <option value="3">Episode 3</option>
+    <option value="4">Episode 4</option>
+    <option value="5">Episode 5</option>
+    <option value="6">Episode 6</option>
+    <option value="7">Episode 7</option>
+    <option value="8">Episode 8</option>
+    <option value="9">Episode 9</option>
+    <option value="10">Episode 10</option>
+  </select>
+</div>
+<div class="chart-row">
+  <div id="elim-by-episode" class="chart"></div>
+  <div id="win-by-episode" class="chart"></div>
+</div>
 
-<div class="ticks"></div>
-
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src=${viteLogo} alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript" target="_blank">
-          <img class="button-icon" src="${javascriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
-
-<div class="ticks"></div>
-<section id="spacer"></section>
 `
 
-setupCounter(document.querySelector('#counter'))

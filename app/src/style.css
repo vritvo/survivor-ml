@@ -294,3 +294,15 @@ code {
     border-right-color: var(--border);
   }
 }
+
+.chart-row {
+  display: flex;
+  flex-direction: row;
+}
+.chart { 
+  height: 30px;
+  width: 100px;
+  margin: 10px;
+  background-color: lightblue;
+  flex: 1;
+}
