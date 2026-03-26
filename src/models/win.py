@@ -14,6 +14,7 @@ import argparse
 import pandas as pd
 import numpy as np
 import json
+from pathlib import Path
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss
@@ -440,8 +441,11 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     model, scaler = train_model(train)
     preds = predict(model, scaler, target)
     
-    # Save to json: 
-    with open(f"app/public/data/seasons/season_{target_season}.json", "w") as f:
+    # Save to json for the web app
+    project_root = Path(__file__).parent.parent.parent
+    out_dir = project_root / "app" / "public" / "data" / "seasons"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / f"season_{target_season}.json", "w") as f:
         json.dump(preds.to_dict(orient="records"), f)
         
     # Return the predictions as a DataFrame
