@@ -1,4 +1,5 @@
 import './style.css'
+import Plotly from 'plotly.js-dist-min'
 
 //TODO: Have the season selector automatically populate with seasons /episodes from data/seasons
 document.querySelector('#app').innerHTML = `
@@ -35,4 +36,17 @@ document.querySelector('#app').innerHTML = `
 </div>
 
 `
+
+async function loadSeason(seasonNumber) {
+  const response = await fetch('data/seasons/season_50.json')
+  const data = await response.json()
+
+  // renderElimTrajectory(data)
+  // renderWinTrajectory(data)
+}
+
+// function renderElimTrajectory(data) {
+// }
+
+loadSeason('50')
 
