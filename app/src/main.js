@@ -15,6 +15,7 @@ document.querySelector('#app').innerHTML = `
   <div id="elim-trajectory" class="chart"></div>
   <div id="win-trajectory" class="chart"></div>
 </div>
+<div class="chart-divider"></div>
 <div class="episode-selector">
   <label for="episode-selector">Episode:</label>
   <select id="episode-selector">
@@ -54,6 +55,7 @@ function renderElimTrajectory(data) {
     height: 500,
     xaxis: { title: "Episode", dtick: 1 },
     yaxis: { title: "P(elimination)", tickformat: ".0%" },
+    legend: { orientation: 'h', y: -0.2 }
   }
 
   const elimTraces = data.map(player => ({ 
@@ -63,7 +65,7 @@ function renderElimTrajectory(data) {
     mode: 'lines+markers'
   }))
 
-  Plotly.newPlot('elim-trajectory', elimTraces, layout)
+  Plotly.newPlot('elim-trajectory', elimTraces, layout, { responsive: true })
 }
 
 function renderWinTrajectory(data) {
@@ -73,7 +75,7 @@ function renderWinTrajectory(data) {
     height: 500,
     xaxis: { title: "Episode", dtick: 1 },
     yaxis: { title: "P(win)", tickformat: ".0%" },
-  }
+    legend: { orientation: 'h', y: -0.2 }  }
 
   const winTraces = data.map(player => ({ 
     name: player.castaway, 
@@ -82,7 +84,7 @@ function renderWinTrajectory(data) {
     mode: 'lines+markers'
   }))
 
-  Plotly.newPlot('win-trajectory', winTraces, layout)
+  Plotly.newPlot('win-trajectory', winTraces, layout, { responsive: true })
 }
 
 loadSeason('50')

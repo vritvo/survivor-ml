@@ -299,10 +299,18 @@ code {
   display: flex;
   flex-direction: row;
 }
-.chart { 
-  height: 30px;
-  width: 100px;
+
+.episode-selector {
+  margin: 24px 0;
+}
+.chart {
+  height: 400px;
   margin: 10px;
-  background-color: lightblue;
   flex: 1;
+}
+
+.chart-divider {
+  height: 100px;
+  background-color: var(--bg);
+
 }
