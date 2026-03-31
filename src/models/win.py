@@ -441,12 +441,16 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     model, scaler = train_model(train)
     preds = predict(model, scaler, target)
     
+    # Aggregate the predictions by castaway, getting a list of episodes and predictions for each castaway
+    agg_preds = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg({'episode': lambda x: list(x), 'prob_win': lambda x: list(x),  'prob_eliminated': lambda x: list(x), "eliminated_this_episode": lambda x: list(x)})
+    agg_preds = agg_preds.reset_index()
+    
     # Save to json for the web app
     project_root = Path(__file__).parent.parent.parent
     out_dir = project_root / "app" / "public" / "data" / "seasons"
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / f"season_{target_season}.json", "w") as f:
-        json.dump(preds.to_dict(orient="records"), f)
+        json.dump(agg_preds.to_dict(orient="records"), f)
         
     # Return the predictions as a DataFrame
     return preds

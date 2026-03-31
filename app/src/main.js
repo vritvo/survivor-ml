@@ -41,12 +41,49 @@ async function loadSeason(seasonNumber) {
   const response = await fetch('data/seasons/season_50.json')
   const data = await response.json()
 
-  // renderElimTrajectory(data)
-  // renderWinTrajectory(data)
+
+
+  renderElimTrajectory(data)
+  renderWinTrajectory(data)
 }
 
-// function renderElimTrajectory(data) {
-// }
+function renderElimTrajectory(data) {
+
+  const layout = {
+    title: "Elimination probability by episode",
+    height: 500,
+    xaxis: { title: "Episode", dtick: 1 },
+    yaxis: { title: "P(elimination)", tickformat: ".0%" },
+  }
+
+  const elimTraces = data.map(player => ({ 
+    name: player.castaway, 
+    x: player.episode, 
+    y: player.prob_eliminated, 
+    mode: 'lines+markers'
+  }))
+
+  Plotly.newPlot('elim-trajectory', elimTraces, layout)
+}
+
+function renderWinTrajectory(data) {
+
+  const layout = {
+    title: "Win probability by episode",
+    height: 500,
+    xaxis: { title: "Episode", dtick: 1 },
+    yaxis: { title: "P(win)", tickformat: ".0%" },
+  }
+
+  const winTraces = data.map(player => ({ 
+    name: player.castaway, 
+    x: player.episode, 
+    y: player.prob_win, 
+    mode: 'lines+markers'
+  }))
+
+  Plotly.newPlot('win-trajectory', winTraces, layout)
+}
 
 loadSeason('50')
 
