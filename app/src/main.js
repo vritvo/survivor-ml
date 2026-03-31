@@ -46,6 +46,7 @@ async function loadSeason(seasonNumber) {
 
   renderElimTrajectory(data)
   renderWinTrajectory(data)
+  renderElimBar(data)
 }
 
 function renderElimTrajectory(data) {
@@ -85,6 +86,46 @@ function renderWinTrajectory(data) {
   }))
 
   Plotly.newPlot('win-trajectory', winTraces, layout, { responsive: true })
+
+}
+
+function getEpisodeData(data, episode) {
+
+  const epData = data.map(player => {
+    const idx = player.episode.indexOf(episode)
+    if (idx === -1) return null // player wasn't in episode
+    return {
+      castaway: player.castaway,
+      prob_win: player.prob_win[idx],
+      prob_eliminated: player.prob_eliminated[idx]    }
+    
+  }).filter(d => d !== null)
+
+  return epData
+}
+
+function renderElimBar(data) {
+  const layout = {
+    title: "Elimination probability by episode",
+    height: 500,
+    xaxis: { title: "Episode", dtick: 1 },
+    yaxis: { title: "P(elimination)", tickformat: ".0%" },
+    legend: { orientation: 'h', y: -0.2 }  }
+
+  
+  
+  const elimData = getEpisodeData(data,1) //todo change episode 
+
+  const elimEpTrace = [{
+    x: elimData.map(d => d.prob_eliminated),
+    y: elimData.map(d => d.castaway),
+    type: 'bar',
+    orientation: 'h'
+  }]
+
+  Plotly.newPlot('elim-by-episode', elimEpTrace,layout,  { responsive: true })
+
+
 }
 
 loadSeason('50')
