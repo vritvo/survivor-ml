@@ -110,15 +110,18 @@ function renderElimBar(data) {
     height: 500,
     xaxis: { title: "Episode", dtick: 1 },
     yaxis: { title: "P(elimination)", tickformat: ".0%" },
-    legend: { orientation: 'h', y: -0.2 }  }
+    legend: { orientation: 'h', y: -0.2 }  ,
+    margin: { l: 100, t: 40 }
+  }
 
   
   
-  const elimData = getEpisodeData(data,1) //todo change episode 
+  const elimData = getEpisodeData(data, 1) //todo change episode
+  const sorted = elimData.sort((a, b) => a.prob_eliminated - b.prob_eliminated)
 
   const elimEpTrace = [{
-    x: elimData.map(d => d.prob_eliminated),
-    y: elimData.map(d => d.castaway),
+    x: sorted.map(d => d.prob_eliminated),
+    y: sorted.map(d => d.castaway),
     type: 'bar',
     orientation: 'h'
   }]
