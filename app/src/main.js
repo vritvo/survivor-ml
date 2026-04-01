@@ -19,8 +19,8 @@ document.querySelector('#app').innerHTML = `
 <div class="episode-selector">
   <label for="episode-selector">Episode:</label>
   <select id="episode-selector">
-    <option value="1">Episode 1</option>
-    <option value="2" selected>Episode 2</option>
+    <option value="1" selected>Episode 1</option>
+    <option value="2">Episode 2</option>
     <option value="3">Episode 3</option>
     <option value="4">Episode 4</option>
     <option value="5">Episode 5</option>
@@ -39,15 +39,17 @@ document.querySelector('#app').innerHTML = `
 `
 
 async function loadSeason(seasonNumber) {
-  const response = await fetch('data/seasons/season_50.json')
+  const response = await fetch('data/seasons/season_' + seasonNumber + '.json')
   const data = await response.json()
+  currentData = data
 
-
+  console.log('data/seasons/season_' + seasonNumber + '.json')
+  //todo -- take the sesason and put as argument to functions
 
   renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory')
   renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory')
-  renderBar(data, 1, 'prob_eliminated', 'Elimination probability — Episode 1', 'elim-by-episode')
-  renderBar(data, 1, 'prob_win', 'Win probability — Episode 1', 'win-by-episode')
+  renderBar(data, Number(episodeButton.value), 'prob_eliminated', 'Elimination probability — Episode ' + episodeButton.value, 'elim-by-episode')
+  renderBar(data, Number(episodeButton.value), 'prob_win', 'Win probability — Episode ' + episodeButton.value, 'win-by-episode')
 }
 
 function renderTrajectory(data, probCol, title, yLabel, divId) {
@@ -107,5 +109,23 @@ function renderBar(data, episode, probCol, title, divId) {
   Plotly.newPlot(divId, trace, layout, { responsive: true })
 }
 
-loadSeason('50')
+let currentData = null
+var season = '50'
+var seasonButton = document.getElementById("season-selector")
+seasonButton.addEventListener("change", function(e) {
+  season = seasonButton.value
+  console.log(season)
+  loadSeason(season)
+})
 
+var episode = '1'
+var episodeButton = document.getElementById("episode-selector")
+episodeButton.addEventListener("change", function(e) {
+  episode = Number(episodeButton.value)
+  console.log(episode)
+  renderBar(currentData, episode, 'prob_eliminated', 'Elimination probability — Episode ' + episode, 'elim-by-episode')
+  renderBar(currentData, episode, 'prob_win', 'Win probability — Episode ' + episode, 'win-by-episode')
+
+})
+
+loadSeason(seasonButton.value)
