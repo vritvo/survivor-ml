@@ -44,50 +44,29 @@ async function loadSeason(seasonNumber) {
 
 
 
-  renderElimTrajectory(data)
-  renderWinTrajectory(data)
-  renderElimBar(data)
-  renderWinBar(data)
+  renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory')
+  renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory')
+  renderBar(data, 1, 'prob_eliminated', 'Elimination probability — Episode 1', 'elim-by-episode')
+  renderBar(data, 1, 'prob_win', 'Win probability — Episode 1', 'win-by-episode')
 }
 
-function renderElimTrajectory(data) {
-
+function renderTrajectory(data, probCol, title, yLabel, divId) {
   const layout = {
-    title: "Elimination probability by episode",
+    title: { text: title },
     height: 500,
-    xaxis: { title: "Episode", dtick: 1 },
-    yaxis: { title: "P(elimination)", tickformat: ".0%" },
+    xaxis: { title: { text: "Episode" }, dtick: 1 },
+    yaxis: { title: { text: yLabel }, tickformat: ".0%" },
     legend: { orientation: 'h', y: -0.2 }
   }
 
-  const elimTraces = data.map(player => ({ 
-    name: player.castaway, 
-    x: player.episode, 
-    y: player.prob_eliminated, 
+  const traces = data.map(player => ({
+    name: player.castaway,
+    x: player.episode,
+    y: player[probCol],
     mode: 'lines+markers'
   }))
 
-  Plotly.newPlot('elim-trajectory', elimTraces, layout, { responsive: true })
-}
-
-function renderWinTrajectory(data) {
-
-  const layout = {
-    title: "Win probability by episode",
-    height: 500,
-    xaxis: { title: "Episode", dtick: 1 },
-    yaxis: { title: "P(win)", tickformat: ".0%" },
-    legend: { orientation: 'h', y: -0.2 }  }
-
-  const winTraces = data.map(player => ({ 
-    name: player.castaway, 
-    x: player.episode, 
-    y: player.prob_win, 
-    mode: 'lines+markers'
-  }))
-
-  Plotly.newPlot('win-trajectory', winTraces, layout, { responsive: true })
-
+  Plotly.newPlot(divId, traces, layout, { responsive: true })
 }
 
 function getEpisodeData(data, episode) {
@@ -106,57 +85,26 @@ function getEpisodeData(data, episode) {
 }
 
 
-function renderWinBar(data) {
+function renderBar(data, episode, probCol, title, divId) {
   const layout = {
-    title: "Win probability by episode",
+    title: { text: title },
     height: 500,
-    xaxis: { title: "Episode", dtick: 1 },
-    yaxis: { title: "P(elimination)", tickformat: ".0%" },
-    legend: { orientation: 'h', y: -0.2 }  ,
+    xaxis: { title: { text: "Probability" }, tickformat: ".0%" },
+    yaxis: { title: { text: "Player" } },
     margin: { l: 100, t: 40 }
   }
 
-  const winData = getEpisodeData(data, 1) //todo change episode
-  const sorted = winData.sort((a, b) => a.prob_win - b.prob_win)
+  const epData = getEpisodeData(data, episode)
+  const sorted = epData.sort((a, b) => a[probCol] - b[probCol])
 
-  const winEpTrace = [{
-    x: sorted.map(d => d.prob_win),
+  const trace = [{
+    x: sorted.map(d => d[probCol]),
     y: sorted.map(d => d.castaway),
     type: 'bar',
     orientation: 'h'
   }]
 
-  Plotly.newPlot('win-by-episode', winEpTrace,layout,  { responsive: true })
-
-
-}
-
-
-
-function renderElimBar(data) {
-  const layout = {
-    title: "Elimination probability by episode",
-    height: 500,
-    xaxis: { title: "Episode", dtick: 1 },
-    yaxis: { title: "P(elimination)", tickformat: ".0%" },
-    legend: { orientation: 'h', y: -0.2 }  ,
-    margin: { l: 100, t: 40 }
-  }
-
-
-  const elimData = getEpisodeData(data, 1) //todo change episode
-  const sorted = elimData.sort((a, b) => a.prob_eliminated - b.prob_eliminated)
-
-  const elimEpTrace = [{
-    x: sorted.map(d => d.prob_eliminated),
-    y: sorted.map(d => d.castaway),
-    type: 'bar',
-    orientation: 'h'
-  }]
-
-  Plotly.newPlot('elim-by-episode', elimEpTrace,layout,  { responsive: true })
-
-
+  Plotly.newPlot(divId, trace, layout, { responsive: true })
 }
 
 loadSeason('50')
