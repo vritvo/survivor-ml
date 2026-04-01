@@ -47,6 +47,7 @@ async function loadSeason(seasonNumber) {
   renderElimTrajectory(data)
   renderWinTrajectory(data)
   renderElimBar(data)
+  renderWinBar(data)
 }
 
 function renderElimTrajectory(data) {
@@ -104,6 +105,34 @@ function getEpisodeData(data, episode) {
   return epData
 }
 
+
+function renderWinBar(data) {
+  const layout = {
+    title: "Win probability by episode",
+    height: 500,
+    xaxis: { title: "Episode", dtick: 1 },
+    yaxis: { title: "P(elimination)", tickformat: ".0%" },
+    legend: { orientation: 'h', y: -0.2 }  ,
+    margin: { l: 100, t: 40 }
+  }
+
+  const winData = getEpisodeData(data, 1) //todo change episode
+  const sorted = winData.sort((a, b) => a.prob_win - b.prob_win)
+
+  const winEpTrace = [{
+    x: sorted.map(d => d.prob_win),
+    y: sorted.map(d => d.castaway),
+    type: 'bar',
+    orientation: 'h'
+  }]
+
+  Plotly.newPlot('win-by-episode', winEpTrace,layout,  { responsive: true })
+
+
+}
+
+
+
 function renderElimBar(data) {
   const layout = {
     title: "Elimination probability by episode",
@@ -114,8 +143,7 @@ function renderElimBar(data) {
     margin: { l: 100, t: 40 }
   }
 
-  
-  
+
   const elimData = getEpisodeData(data, 1) //todo change episode
   const sorted = elimData.sort((a, b) => a.prob_eliminated - b.prob_eliminated)
 
