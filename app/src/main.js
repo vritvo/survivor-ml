@@ -12,7 +12,6 @@ document.querySelector('#app').innerHTML = `
   <div id="elim-trajectory" class="chart"></div>
   <div id="win-trajectory" class="chart"></div>
 </div>
-<div class="chart-divider"></div>
 <div class="episode-selector">
   <label for="episode-selector">Episode:</label>
   <select id="episode-selector">
@@ -27,7 +26,7 @@ document.querySelector('#app').innerHTML = `
 
 async function loadSeason(seasonNumber) {
   /** Load the season data */
-  
+
   const response = await fetch('data/seasons/season_' + seasonNumber + '.json')
   const data = await response.json()
   currentData = data
@@ -55,10 +54,11 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
 
   const layout = {
     title: { text: title },
-    height: 500,
+    height: 600,
     xaxis: { title: { text: "Episode" }, dtick: 1 },
     yaxis: { title: { text: yLabel }, tickformat: ".0%" },
-    legend: { orientation: 'h', y: -0.2 }
+    legend: { orientation: 'h', y: -0.15, font: { size: 10 } },
+    margin: { b: 150 }
   }
 
   const traces = data.map(player => ({
