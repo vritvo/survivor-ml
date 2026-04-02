@@ -2,26 +2,28 @@ import './style.css'
 import Plotly from 'plotly.js-dist-min'
 
 document.querySelector('#app').innerHTML = `
-<h1>Survivor ML</h1>
-<div class="season-selector"> 
-<label for="season-selector">Season:</label>
-  <select id="season-selector">
-  </select>
-</div>
-<div class="chart-row">
-  <div id="elim-trajectory" class="chart"></div>
-  <div id="win-trajectory" class="chart"></div>
-</div>
-<div class="chart-divider"></div>
-<div class="episode-selector">
-  <label for="episode-selector">Episode:</label>
-  <select id="episode-selector">
-  </select>
-</div>
-<div class="chart-row">
-  <div id="elim-by-episode" class="chart"></div>
-  <div id="win-by-episode" class="chart"></div>
-</div>
+<nav class="sidebar">
+  <h1>Survivor ML</h1>
+  <div class="sidebar-control">
+    <label for="season-selector">Season</label>
+    <select id="season-selector"></select>
+  </div>
+  <div class="sidebar-control">
+    <label for="episode-selector">Episode</label>
+    <select id="episode-selector"></select>
+  </div>
+</nav>
+<main class="content">
+  <div class="chart-row">
+    <div id="elim-trajectory" class="chart"></div>
+    <div id="win-trajectory" class="chart"></div>
+  </div>
+  <div class="chart-divider"></div>
+  <div class="chart-row">
+    <div id="elim-by-episode" class="chart"></div>
+    <div id="win-by-episode" class="chart"></div>
+  </div>
+</main>
 
 `
 

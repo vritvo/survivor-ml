@@ -157,15 +157,47 @@ code {
 }
 
 #app {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
+  display: flex;
   min-height: 100svh;
+  box-sizing: border-box;
+}
+
+.sidebar {
+  width: 180px;
+  padding: 24px 16px;
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
+  gap: 20px;
+  flex-shrink: 0;
+}
+
+.sidebar h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.sidebar-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-control label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.sidebar-control select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+
+.content {
+  flex: 1;
+  padding: 16px;
+  overflow-x: hidden;
 }
 
 #center {
@@ -300,17 +332,11 @@ code {
   flex-direction: row;
 }
 
-.episode-selector {
-  margin: 24px 0;
-}
 .chart {
-  height: 400px;
   margin: 10px;
   flex: 1;
 }
 
 .chart-divider {
-  height: 200px;
-  background-color: var(--bg);
-
+  height: 40px;
 }
