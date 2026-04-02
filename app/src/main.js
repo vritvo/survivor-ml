@@ -12,6 +12,7 @@ document.querySelector('#app').innerHTML = `
   <div id="elim-trajectory" class="chart"></div>
   <div id="win-trajectory" class="chart"></div>
 </div>
+<div class="chart-divider"></div>
 <div class="episode-selector">
   <label for="episode-selector">Episode:</label>
   <select id="episode-selector">
@@ -65,8 +66,51 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
     name: player.castaway,
     x: player.episode,
     y: player[probCol],
-    mode: 'lines+markers'
+    mode: 'lines+markers',
+    line: { color: player.won_season === 1 ? 'gold' : undefined, width: player.won_season === 1 ? 3 : 2 },
+    marker: { size: player.won_season === 1 ? 8 : 5 }
   }))
+
+  // Add X markers where players are eliminated
+  const elimX = []
+  const elimY = []
+  const elimText = []
+  data.forEach(player => {
+    player.eliminated_this_episode.forEach((elim, i) => {
+      if (elim === 1) {
+        elimX.push(player.episode[i])
+        elimY.push(player[probCol][i])
+        elimText.push(player.castaway)
+      }
+    })
+  })
+
+  traces.push({
+    x: elimX,
+    y: elimY,
+    text: elimText,
+    mode: 'markers',
+    marker: { symbol: 'x', size: 8, color: 'rgba(0,0,0,0.5)', line: { width: 1.5 } },
+    name: 'Eliminated',
+    hovertemplate: '%{text}<extra>Eliminated</extra>',
+    showlegend: false
+  })
+
+  // Add star for the winner's final episode
+  data.forEach(player => {
+    if (player.won_season === 1) {
+      const lastIdx = player.episode.length - 1
+      traces.push({
+        x: [player.episode[lastIdx]],
+        y: [player[probCol][lastIdx]],
+        mode: 'markers',
+        marker: { symbol: 'star', size: 16, color: 'gold', line: { color: 'black', width: 1 } },
+        name: player.castaway + ' (Winner)',
+        showlegend: false,
+        hovertemplate: player.castaway + ' - Winner<extra></extra>'
+      })
+    }
+  })
 
   Plotly.newPlot(divId, traces, layout, { responsive: true })
 }
