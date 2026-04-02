@@ -1,14 +1,11 @@
 import './style.css'
 import Plotly from 'plotly.js-dist-min'
 
-//TODO: Have the season selector automatically populate with seasons /episodes from data/seasons
 document.querySelector('#app').innerHTML = `
 <h1>Survivor ML</h1>
 <div class="season-selector"> 
 <label for="season-selector">Season:</label>
   <select id="season-selector">
-    <option value="20">Season 20</option>
-    <option value="50" selected>Season 50</option>
   </select>
 </div>
 <div class="chart-row">
@@ -19,16 +16,6 @@ document.querySelector('#app').innerHTML = `
 <div class="episode-selector">
   <label for="episode-selector">Episode:</label>
   <select id="episode-selector">
-    <option value="1" selected>Episode 1</option>
-    <option value="2">Episode 2</option>
-    <option value="3">Episode 3</option>
-    <option value="4">Episode 4</option>
-    <option value="5">Episode 5</option>
-    <option value="6">Episode 6</option>
-    <option value="7">Episode 7</option>
-    <option value="8">Episode 8</option>
-    <option value="9">Episode 9</option>
-    <option value="10">Episode 10</option>
   </select>
 </div>
 <div class="chart-row">
@@ -39,20 +26,33 @@ document.querySelector('#app').innerHTML = `
 `
 
 async function loadSeason(seasonNumber) {
+  /** Load the season data */
+  
   const response = await fetch('data/seasons/season_' + seasonNumber + '.json')
   const data = await response.json()
   currentData = data
 
-  console.log('data/seasons/season_' + seasonNumber + '.json')
-  //todo -- take the sesason and put as argument to functions
+  // Build episode dropdown from data
+  const maxEpisode = Math.max(...data.map(player => player.episode.length))
+  const episodeSelect = document.getElementById("episode-selector")
+  episodeSelect.innerHTML = ""
+  for (let i = 1; i <= maxEpisode; i++) {
+    const option = document.createElement("option")
+    option.value = i
+    option.textContent = "Episode " + i
+    episodeSelect.appendChild(option)
+  }
+  episodeSelect.value = 1
 
   renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory')
   renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory')
-  renderBar(data, Number(episodeButton.value), 'prob_eliminated', 'Elimination probability — Episode ' + episodeButton.value, 'elim-by-episode')
-  renderBar(data, Number(episodeButton.value), 'prob_win', 'Win probability — Episode ' + episodeButton.value, 'win-by-episode')
+  renderBar(data, 1, 'prob_eliminated', 'Elimination probability — Episode 1', 'elim-by-episode')
+  renderBar(data, 1, 'prob_win', 'Win probability — Episode 1', 'win-by-episode')
 }
 
 function renderTrajectory(data, probCol, title, yLabel, divId) {
+  /** Render the trajectory chart for a specific probability column */
+
   const layout = {
     title: { text: title },
     height: 500,
@@ -72,6 +72,7 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
 }
 
 function getEpisodeData(data, episode) {
+  /** Get the data for a specific episode */
 
   const epData = data.map(player => {
     const idx = player.episode.indexOf(episode)
@@ -88,6 +89,8 @@ function getEpisodeData(data, episode) {
 
 
 function renderBar(data, episode, probCol, title, divId) {
+  /** Render the bar chart for a specific episode */
+
   const layout = {
     title: { text: title },
     height: 500,
@@ -128,4 +131,27 @@ episodeButton.addEventListener("change", function(e) {
 
 })
 
-loadSeason(seasonButton.value)
+// Initialize the app
+async function init() {
+  const response = await fetch('data/seasons/index.json')
+  const seasons = await response.json()
+
+  // Add seasons to the season selector
+  const seasonSelect = document.getElementById("season-selector")
+  seasons.forEach(season => {
+    const option = document.createElement("option")
+    option.value = season
+    option.textContent = "Season " + season
+    seasonSelect.appendChild(option)
+
+  })
+
+  // Default to the highest season
+  seasonSelect.value = seasons[seasons.length - 1]
+
+  // Load that season
+  loadSeason(seasonSelect.value)
+}
+
+
+init()
