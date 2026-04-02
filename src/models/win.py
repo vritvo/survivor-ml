@@ -451,6 +451,11 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / f"season_{target_season}.json", "w") as f:
         json.dump(agg_preds.to_dict(orient="records"), f)
+
+    # Update index of available seasons
+    seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
+    with open(out_dir / "index.json", "w") as f:
+        json.dump(seasons, f)
         
     # Return the predictions as a DataFrame
     return preds
