@@ -443,23 +443,62 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
 
     model, scaler = train_model(train)
     preds = predict(model, scaler, target)
-    
+
+    # Merge feature values onto predictions so we can export them
+    feature_df = target[["season", "episode", "castaway_id"] + FEATURE_COLS].copy()
+    preds = preds.merge(feature_df, on=["season", "episode", "castaway_id"], how="left")
+
     # Aggregate the predictions by castaway, getting a list of episodes and predictions for each castaway
-    agg_preds = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg({'episode': lambda x: list(x), 'prob_win': lambda x: list(x),  'prob_eliminated': lambda x: list(x), "eliminated_this_episode": lambda x: list(x)})
+    agg_cols = {
+        'episode': lambda x: list(x),
+        'prob_win': lambda x: list(x),
+        'prob_eliminated': lambda x: list(x),
+        'eliminated_this_episode': lambda x: list(x),
+    }
+    # Add feature columns to aggregation (each becomes a list of per-episode values)
+    for feat in FEATURE_COLS:
+        agg_cols[feat] = lambda x, f=feat: list(x)
+
+    agg_preds = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg(agg_cols)
     agg_preds = agg_preds.reset_index()
-    
+
+    # Nest feature values under a "features" dict per player
+    players = []
+    for _, row in agg_preds.iterrows():
+        player = {
+            "season": int(row["season"]),
+            "castaway_id": row["castaway_id"],
+            "castaway": row["castaway"],
+            "won_season": int(row["won_season"]),
+            "episode": row["episode"],
+            "prob_win": row["prob_win"],
+            "prob_eliminated": row["prob_eliminated"],
+            "eliminated_this_episode": row["eliminated_this_episode"],
+            "features": {feat: row[feat] for feat in FEATURE_COLS},
+        }
+        players.append(player)
+
+    # Build model info for this season's model
+    model_info = {
+        "features": FEATURE_COLS,
+        "coefficients": model.coef_[0].tolist(),
+        "intercept": model.intercept_[0],
+        "scaler_means": scaler.mean_.tolist(),
+        "scaler_stds": scaler.scale_.tolist(),
+    }
+
     # Save to json for the web app
     project_root = Path(__file__).parent.parent.parent
     out_dir = project_root / "app" / "public" / "data" / "seasons"
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / f"season_{target_season}.json", "w") as f:
-        json.dump(agg_preds.to_dict(orient="records"), f)
+        json.dump({"model_info": model_info, "players": players}, f)
 
     # Update index of available seasons
     seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
     with open(out_dir / "index.json", "w") as f:
         json.dump(seasons, f)
-        
+
     # Return the predictions as a DataFrame
     return preds
 
