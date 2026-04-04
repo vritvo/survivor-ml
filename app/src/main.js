@@ -55,51 +55,50 @@ async function loadSeason(seasonNumber) {
 function renderTrajectory(data, probCol, title, yLabel, divId) {
   /** Render the trajectory chart for a specific probability column */
 
+  const allY = data.flatMap(player => player[probCol])
+  const yMin = Math.min(...allY)
+  const yMax = Math.max(...allY)
+  const yPad = (yMax - yMin) * 0.05
+  const maxEp = Math.max(...data.flatMap(player => player.episode))
+
   const layout = {
     title: { text: title },
     height: 600,
-    xaxis: { title: { text: "Episode" }, dtick: 1 },
-    yaxis: { title: { text: yLabel }, tickformat: ".0%" },
+    xaxis: { title: { text: "Episode" }, dtick: 1, range: [0.5, maxEp + 0.5], autorange: false },
+    yaxis: { title: { text: yLabel }, tickformat: ".0%", range: [yMin - yPad, yMax + yPad], autorange: false },
     legend: { orientation: 'h', y: -0.15, font: { size: 10 } },
     margin: { b: 150 }
   }
 
-  const traces = data.map(player => ({
-    name: player.castaway,
-    x: player.episode,
-    y: player[probCol],
-    mode: 'lines+markers',
-    line: { color: player.won_season === 1 ? 'gold' : undefined, width: player.won_season === 1 ? 3 : 2 },
-    marker: { size: player.won_season === 1 ? 8 : 5 }
-  }))
-
-  // Add X markers where players are eliminated
-  const elimX = []
-  const elimY = []
-  const elimText = []
+  const traces = []
   data.forEach(player => {
+    // Main line trace
+    traces.push({
+      name: player.castaway,
+      legendgroup: player.castaway,
+      x: player.episode,
+      y: player[probCol],
+      mode: 'lines+markers',
+      line: { color: player.won_season === 1 ? 'gold' : undefined, width: player.won_season === 1 ? 3 : 2 },
+      marker: { size: player.won_season === 1 ? 8 : 5 }
+    })
+
+    // Per-player elimination X marker
     player.eliminated_this_episode.forEach((elim, i) => {
       if (elim === 1) {
-        elimX.push(player.episode[i])
-        elimY.push(player[probCol][i])
-        elimText.push(player.castaway)
+        traces.push({
+          x: [player.episode[i]],
+          y: [player[probCol][i]],
+          mode: 'markers',
+          marker: { symbol: 'x', size: 8, color: 'rgba(0,0,0,0.5)', line: { width: 1.5 } },
+          legendgroup: player.castaway,
+          showlegend: false,
+          hovertemplate: player.castaway + '<extra>Eliminated</extra>'
+        })
       }
     })
-  })
 
-  traces.push({
-    x: elimX,
-    y: elimY,
-    text: elimText,
-    mode: 'markers',
-    marker: { symbol: 'x', size: 8, color: 'rgba(0,0,0,0.5)', line: { width: 1.5 } },
-    name: 'Eliminated',
-    hovertemplate: '%{text}<extra>Eliminated</extra>',
-    showlegend: false
-  })
-
-  // Add star for the winner's final episode
-  data.forEach(player => {
+    // Winner star on final episode
     if (player.won_season === 1) {
       const lastIdx = player.episode.length - 1
       traces.push({
@@ -107,7 +106,7 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
         y: [player[probCol][lastIdx]],
         mode: 'markers',
         marker: { symbol: 'star', size: 16, color: 'gold', line: { color: 'black', width: 1 } },
-        name: player.castaway + ' (Winner)',
+        legendgroup: player.castaway,
         showlegend: false,
         hovertemplate: player.castaway + ' - Winner<extra></extra>'
       })
