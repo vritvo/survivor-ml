@@ -51,13 +51,14 @@ FEATURE_COLS = [
     # "tribe_status_Original",
     # "tribe_status_Swapped",
     # "tribe_status_Swapped_2",
-    #  "advantages_held", # ----
+    # "advantages_held",  
     # "individual_immunity_wins",
     # "has_advantage",
     # "confessional_share_last_ep", 
-    "confessional_share_rolling_3",
+    "confessional_share_rolling_3", #
     # "confessional_share_cumulative",
     # "elim_risk",
+    "elim_risk_rank", #
 ]
 
 TARGET_COL = "won_season"
@@ -68,16 +69,18 @@ TEST_SEASONS = range(41, 51)
 C = 0.5
 
 # All columns that must be non-null before we can generate elim_risk
-_BASE_FEATURES = [f for f in FEATURE_COLS if f != "elim_risk"]
+_BASE_FEATURES = [f for f in FEATURE_COLS if f not in ("elim_risk", "elim_risk_rank")]
 _ALL_NEEDED = list(set(_BASE_FEATURES) | set(ELIM_FEATURE_COLS))
 
 
 # --- Elimination risk scores ---
 
 def _normalize_elim_risk(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize elim_risk within each episode so scores sum to 1."""
+    """Normalize elim_risk within each episode so scores sum to 1, and add rank."""
     ep_sums = df.groupby(["season", "episode"])["elim_risk"].transform("sum")
     df["elim_risk"] = df["elim_risk"] / ep_sums
+    # Rank within episode: 1 = most likely to be eliminated
+    df["elim_risk_rank"] = df.groupby(["season", "episode"])["elim_risk"].rank(ascending=False)
     return df
 
 
