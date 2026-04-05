@@ -125,15 +125,38 @@ async function loadSeason(seasonNumber) {
     playerSelect.appendChild(option)
   })
 
-  // Show empty state for player section
-  document.getElementById("player-section").style.display = "block"
-  document.getElementById("player-empty-state").style.display = "block"
-  document.getElementById("player-charts").style.display = "none"
+  // Default player: winner if season is complete, otherwise most likely winner in final episode
+  const winner = data.find(p => p.won_season === 1)
+  let defaultPlayer = null
+  if (winner) {
+    defaultPlayer = winner
+  } else {
+    const lastEpPlayers = data.filter(p => p.episode.includes(maxEpisode))
+    if (lastEpPlayers.length > 0) {
+      defaultPlayer = lastEpPlayers.reduce((best, p) => {
+        const idx = p.episode.indexOf(maxEpisode)
+        const bestIdx = best.episode.indexOf(maxEpisode)
+        return p.prob_win[idx] > best.prob_win[bestIdx] ? p : best
+      })
+    }
+  }
+
+  if (defaultPlayer) {
+    playerSelect.value = defaultPlayer.castaway_id
+  }
 
   renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory')
   renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory')
   renderBar(data, maxEpisode, 'prob_eliminated', 'Elimination probability — Episode ' + maxEpisode, 'elim-by-episode')
   renderBar(data, maxEpisode, 'prob_win', 'Win probability — Episode ' + maxEpisode, 'win-by-episode')
+
+  if (defaultPlayer) {
+    renderPlayerDetail(data, defaultPlayer.castaway_id, maxEpisode)
+  } else {
+    document.getElementById("player-section").style.display = "block"
+    document.getElementById("player-empty-state").style.display = "block"
+    document.getElementById("player-charts").style.display = "none"
+  }
 }
 
 function renderTrajectory(data, probCol, title, yLabel, divId) {
