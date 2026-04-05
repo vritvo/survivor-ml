@@ -26,6 +26,7 @@ from src.models.utils import preprocess, split_by_season
 FEATURE_COLS = [
     # "episode",
     "age",
+    # "age_rank",
     # "age_x_episode",
     # "gender_Male",
     # "gender_Non-binary",

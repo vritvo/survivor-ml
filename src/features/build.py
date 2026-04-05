@@ -123,6 +123,9 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
         on="castaway_id", how="left",
     )
     
+    # Age rank: relative age among remaining players in each episode
+    df["age_rank"] = df.groupby(["season", "episode"])["age"].rank()
+
     # Interaction effects: 
     df["age_x_episode"] = df["age"] * df["episode"]
 
