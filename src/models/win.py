@@ -120,15 +120,18 @@ def add_elim_risk_oof(train_df: pd.DataFrame) -> pd.DataFrame:
     return _normalize_elim_risk(result)
 
 
-def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> pd.DataFrame:
-    """Train elimination model on train_df, add normalized P(eliminated) to predict_df."""
+def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> tuple[pd.DataFrame, object, object]:
+    """Train elimination model on train_df, add normalized P(eliminated) to predict_df.
+
+    Returns (predict_df_with_risk, elim_model, elim_scaler).
+    """
     elim_model, elim_scaler = train_elim_model(train_df)
     X = elim_scaler.transform(predict_df[ELIM_FEATURE_COLS])
     probs = elim_model.predict_proba(X)[:, 1]
 
     result = predict_df.copy()
     result["elim_risk"] = probs
-    return _normalize_elim_risk(result)
+    return _normalize_elim_risk(result), elim_model, elim_scaler
 
 
 # --- Training ---
@@ -325,7 +328,7 @@ def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
     """
     def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
         train_df = add_elim_risk_oof(train_df)
-        test_df = add_elim_risk(train_df, test_df)
+        test_df, _, _ = add_elim_risk(train_df, test_df)
         model, scaler = train_model(train_df, feature_cols=feature_cols, **kwargs)
         return predict_and_evaluate(model, scaler, test_df, feature_cols=feature_cols)
     return fn
@@ -343,7 +346,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     # Generate elimination risk as a feature: out-of-fold for train (no leakage),
     # then train a fresh elim model on all train data to score test.
     train = add_elim_risk_oof(train)
-    test = add_elim_risk(train, test)
+    test, _, _ = add_elim_risk(train, test)
 
     print(f"Train: {len(train):,} rows ({train['season'].nunique()} seasons)")
     print(f"Test:  {len(test):,} rows ({test['season'].nunique()} seasons)")
@@ -436,7 +439,7 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
 
     # Generate elimination risk scores using only prior-season data
     train = add_elim_risk_oof(train)
-    target = add_elim_risk(train, target)
+    target, elim_model, elim_scaler = add_elim_risk(train, target)
 
     print(f"Training on seasons 1-{target_season - 1} ({len(train):,} rows), "
           f"predicting season {target_season} ({len(target):,} rows)")
@@ -445,7 +448,10 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     preds = predict(model, scaler, target)
 
     # Merge feature values onto predictions so we can export them
-    feature_df = target[["season", "episode", "castaway_id"] + FEATURE_COLS].copy()
+    # Include both win model features and elimination model features (excluding final_n which is shared context)
+    elim_display_features = [f for f in ELIM_FEATURE_COLS if f not in ("final_n",)]
+    all_export_features = list(FEATURE_COLS) + [f for f in elim_display_features if f not in FEATURE_COLS]
+    feature_df = target[["season", "episode", "castaway_id"] + all_export_features].copy()
     preds = preds.merge(feature_df, on=["season", "episode", "castaway_id"], how="left")
 
     # Aggregate the predictions by castaway, getting a list of episodes and predictions for each castaway
@@ -456,7 +462,7 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
         'eliminated_this_episode': lambda x: list(x),
     }
     # Add feature columns to aggregation (each becomes a list of per-episode values)
-    for feat in FEATURE_COLS:
+    for feat in all_export_features:
         agg_cols[feat] = lambda x, f=feat: list(x)
 
     agg_preds = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg(agg_cols)
@@ -474,17 +480,25 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
             "prob_win": row["prob_win"],
             "prob_eliminated": row["prob_eliminated"],
             "eliminated_this_episode": row["eliminated_this_episode"],
-            "features": {feat: row[feat] for feat in FEATURE_COLS},
+            "win_features": {feat: row[feat] for feat in FEATURE_COLS},
+            "elim_features": {feat: row[feat] for feat in elim_display_features},
         }
         players.append(player)
 
-    # Build model info for this season's model
-    model_info = {
+    # Build model info for this season's models
+    win_model_info = {
         "features": FEATURE_COLS,
         "coefficients": model.coef_[0].tolist(),
         "intercept": model.intercept_[0],
         "scaler_means": scaler.mean_.tolist(),
         "scaler_stds": scaler.scale_.tolist(),
+    }
+    elim_model_info = {
+        "features": elim_display_features,
+        "coefficients": [elim_model.coef_[0][ELIM_FEATURE_COLS.index(f)] for f in elim_display_features],
+        "intercept": elim_model.intercept_[0],
+        "scaler_means": [elim_scaler.mean_[ELIM_FEATURE_COLS.index(f)] for f in elim_display_features],
+        "scaler_stds": [elim_scaler.scale_[ELIM_FEATURE_COLS.index(f)] for f in elim_display_features],
     }
 
     # Save to json for the web app
@@ -492,7 +506,7 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     out_dir = project_root / "app" / "public" / "data" / "seasons"
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / f"season_{target_season}.json", "w") as f:
-        json.dump({"model_info": model_info, "players": players}, f)
+        json.dump({"win_model_info": win_model_info, "elim_model_info": elim_model_info, "players": players}, f)
 
     # Update index of available seasons
     seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
