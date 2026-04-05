@@ -4,6 +4,7 @@ import Plotly from 'plotly.js-dist-min'
 document.querySelector('#app').innerHTML = `
 <nav class="sidebar">
   <h1>Survivor ML</h1>
+  <p class="sidebar-tagline">Model predictions by season</p>
   <div class="sidebar-control">
     <label for="season-selector">Season</label>
     <select id="season-selector"></select>
@@ -20,31 +21,43 @@ document.querySelector('#app').innerHTML = `
   </div>
 </nav>
 <main class="content">
-  <div class="chart-row">
-    <div id="elim-trajectory" class="chart"></div>
-    <div id="win-trajectory" class="chart"></div>
-  </div>
-  <div class="chart-divider"></div>
-  <div class="chart-row">
-    <div id="elim-by-episode" class="chart"></div>
-    <div id="win-by-episode" class="chart"></div>
-  </div>
-  <div class="detail-header">
-    <div class="detail-controls">
-      <label>View</label>
-      <div class="tab-toggle">
-        <button class="tab-btn active" data-view="bullet">Compared to field</button>
-        <button class="tab-btn" data-view="waterfall">Model contributions</button>
+  <section class="dashboard-section">
+    <h2 class="section-title">Season Trajectories</h2>
+    <p class="section-desc">How each player's predicted probabilities change over the season.</p>
+    <div class="chart-row">
+      <div id="elim-trajectory" class="chart"></div>
+      <div id="win-trajectory" class="chart"></div>
+    </div>
+  </section>
+  <section class="dashboard-section">
+    <h2 class="section-title">Episode Snapshot</h2>
+    <p class="section-desc">Comparing all players in a single episode.</p>
+    <div class="chart-row">
+      <div id="elim-by-episode" class="chart"></div>
+      <div id="win-by-episode" class="chart"></div>
+    </div>
+  </section>
+  <section id="player-section" class="dashboard-section">
+    <h2 class="section-title">Player Breakdown</h2>
+    <p class="section-desc">How the model evaluates a specific player.</p>
+    <p id="player-empty-state" class="empty-state">Pick a player in the sidebar to explore how the model scores them.</p>
+    <div id="player-charts" style="display:none;">
+      <div class="detail-header">
+        <div class="detail-controls">
+          <label>View</label>
+          <div class="tab-toggle">
+            <button class="tab-btn active" data-view="bullet">Compared to field</button>
+            <button class="tab-btn" data-view="waterfall">Model contributions</button>
+          </div>
+        </div>
+      </div>
+      <p id="view-description" class="view-description"></p>
+      <div class="chart-row">
+        <div id="elim-detail" class="chart"></div>
+        <div id="win-detail" class="chart"></div>
       </div>
     </div>
-  </div>
-  <div id="player-detail" class="player-detail" style="display:none;">
-    <p id="view-description" class="view-description"></p>
-    <div class="chart-row">
-      <div id="elim-detail" class="chart"></div>
-      <div id="win-detail" class="chart"></div>
-    </div>
-  </div>
+  </section>
 </main>
 
 `
@@ -91,7 +104,7 @@ async function loadSeason(seasonNumber) {
     option.textContent = "Episode " + i
     episodeSelect.appendChild(option)
   }
-  episodeSelect.value = 1
+  episodeSelect.value = maxEpisode
 
   // Build player dropdown
   const playerSelect = document.getElementById("player-selector")
@@ -104,13 +117,15 @@ async function loadSeason(seasonNumber) {
     playerSelect.appendChild(option)
   })
 
-  // Hide player detail when switching seasons
-  document.getElementById("player-detail").style.display = "none"
+  // Show empty state for player section
+  document.getElementById("player-section").style.display = "block"
+  document.getElementById("player-empty-state").style.display = "block"
+  document.getElementById("player-charts").style.display = "none"
 
   renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory')
   renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory')
-  renderBar(data, 1, 'prob_eliminated', 'Elimination probability — Episode 1', 'elim-by-episode')
-  renderBar(data, 1, 'prob_win', 'Win probability — Episode 1', 'win-by-episode')
+  renderBar(data, maxEpisode, 'prob_eliminated', 'Elimination probability — Episode ' + maxEpisode, 'elim-by-episode')
+  renderBar(data, maxEpisode, 'prob_win', 'Win probability — Episode ' + maxEpisode, 'win-by-episode')
 }
 
 function renderTrajectory(data, probCol, title, yLabel, divId) {
@@ -387,8 +402,8 @@ function renderPlayerDetail(data, castawayId, episode) {
   const epIdx = player.episode.indexOf(episode)
   if (epIdx === -1) return
 
-  // Show the detail section
-  document.getElementById("player-detail").style.display = "block"
+  document.getElementById("player-empty-state").style.display = "none"
+  document.getElementById("player-charts").style.display = "block"
 
   // Update description text
   document.getElementById("view-description").textContent = VIEW_DESCRIPTIONS[currentView]
@@ -434,7 +449,8 @@ var playerButton = document.getElementById("player-selector")
 playerButton.addEventListener("change", function() {
   const playerId = playerButton.value
   if (!playerId) {
-    document.getElementById("player-detail").style.display = "none"
+    document.getElementById("player-empty-state").style.display = "block"
+    document.getElementById("player-charts").style.display = "none"
     return
   }
   const episode = Number(document.getElementById("episode-selector").value)
