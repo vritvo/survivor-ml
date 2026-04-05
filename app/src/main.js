@@ -77,8 +77,9 @@ const FEATURE_LABELS = {
 }
 
 const VIEW_DESCRIPTIONS = {
-  bullet: "How this player compares to others still in the game this episode. Bar width reflects feature importance; green = favorable for the player, red = unfavorable.",
-  waterfall: "How much each feature pushes the model's prediction up or down. Green bars increase the probability, red bars decrease it.",
+  bullet: "How this player compares to the field this episode. Dot position = feature value relative to other players. Green = favorable to the player; red = unfavorable.",
+  waterfall_elim: "How each feature pushes elimination risk. Green = reduces risk; red = increases it.",
+  waterfall_win: "How each feature pushes win probability. Green = increases it; red = decreases it.",
 }
 
 let currentData = null
@@ -274,7 +275,7 @@ function getPlayerFeatureData(data, player, modelInfo, featuresKey, episode) {
   return { features, coefficients, scalerMeans, scalerStds, playerValues, episodeAvgs, episodeMins, episodeMaxs, contributions }
 }
 
-function renderBulletChart(featureData, title, divId) {
+function renderBulletChart(featureData, title, divId, higherIsBetter) {
   const { features, playerValues, episodeAvgs, episodeMins, episodeMaxs, coefficients } = featureData
 
   const absCoefs = coefficients.map(c => Math.abs(c))
@@ -329,10 +330,11 @@ function renderBulletChart(featureData, title, divId) {
       }
     }
 
-    const isGood = (sortedPlayerVals[i] - sortedAvgs[i]) * sortedCoefs[i] > 0
+    const contribution = (sortedPlayerVals[i] - sortedAvgs[i]) * sortedCoefs[i]
+    const helpsPlayer = higherIsBetter ? contribution > 0 : contribution < 0
     dotX.push(dotPos)
     dotY.push(i)
-    dotColors.push(isGood ? '#2ecc71' : '#e74c3c')
+    dotColors.push(helpsPlayer ? '#2ecc71' : '#e74c3c')
     dotHover.push(label + ': ' + sortedPlayerVals[i].toFixed(2) + ' (avg: ' + sortedAvgs[i].toFixed(2) + ')')
   })
 
@@ -346,6 +348,7 @@ function renderBulletChart(featureData, title, divId) {
     showlegend: false,
   }]
 
+  const numFeatures = sortedLabels.length
   const layout = {
     title: { text: title },
     height: 350,
@@ -359,13 +362,17 @@ function renderBulletChart(featureData, title, divId) {
       zeroline: false,
     },
     shapes: shapes,
-    margin: { l: 200, r: 20, t: 40, b: 20 },
+    annotations: [
+      { x: -0.9, y: numFeatures - 0.5, yref: 'y', xref: 'x', text: '← Below avg', showarrow: false, font: { size: 11, color: '#999' }, yanchor: 'top' },
+      { x: 0.9, y: numFeatures - 0.5, yref: 'y', xref: 'x', text: 'Above avg →', showarrow: false, font: { size: 11, color: '#999' }, yanchor: 'top' },
+    ],
+    margin: { l: 200, r: 20, t: 40, b: 30 },
   }
 
   Plotly.newPlot(divId, traces, layout, { responsive: true })
 }
 
-function renderWaterfallChart(featureData, title, xLabel, divId) {
+function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter) {
   const { features, contributions } = featureData
 
   const indices = features.map((_, i) => i)
@@ -373,7 +380,10 @@ function renderWaterfallChart(featureData, title, xLabel, divId) {
 
   const sortedLabels = indices.map(i => FEATURE_LABELS[features[i]] || features[i])
   const sortedContributions = indices.map(i => contributions[i])
-  const colors = sortedContributions.map(c => c > 0 ? '#2ecc71' : '#e74c3c')
+  const colors = sortedContributions.map(c => {
+    const helpsPlayer = higherIsBetter ? c > 0 : c < 0
+    return helpsPlayer ? '#2ecc71' : '#e74c3c'
+  })
 
   const trace = [{
     x: sortedContributions,
@@ -405,8 +415,12 @@ function renderPlayerDetail(data, castawayId, episode) {
   document.getElementById("player-empty-state").style.display = "none"
   document.getElementById("player-charts").style.display = "block"
 
-  // Update description text
-  document.getElementById("view-description").textContent = VIEW_DESCRIPTIONS[currentView]
+  const descEl = document.getElementById("view-description")
+  if (currentView === 'bullet') {
+    descEl.textContent = VIEW_DESCRIPTIONS.bullet
+  } else {
+    descEl.textContent = "Green = helps the player's chances; red = hurts them. Left chart: elimination risk. Right chart: win probability."
+  }
 
   const elimData = currentElimModelInfo
     ? getPlayerFeatureData(data, player, currentElimModelInfo, 'elim_features', episode)
@@ -418,11 +432,11 @@ function renderPlayerDetail(data, castawayId, episode) {
   const playerName = player.castaway + " — Episode " + episode
 
   if (currentView === 'bullet') {
-    if (elimData) renderBulletChart(elimData, 'Elimination — ' + playerName, 'elim-detail')
-    if (winData) renderBulletChart(winData, 'Win — ' + playerName, 'win-detail')
+    if (elimData) renderBulletChart(elimData, 'Elimination — ' + playerName, 'elim-detail', false)
+    if (winData) renderBulletChart(winData, 'Win — ' + playerName, 'win-detail', true)
   } else {
-    if (elimData) renderWaterfallChart(elimData, 'Elimination — ' + playerName, 'Contribution (+ favors elimination)', 'elim-detail')
-    if (winData) renderWaterfallChart(winData, 'Win — ' + playerName, 'Contribution (+ favors winning)', 'win-detail')
+    if (elimData) renderWaterfallChart(elimData, 'Elimination — ' + playerName, 'Model contribution', 'elim-detail', false)
+    if (winData) renderWaterfallChart(winData, 'Win — ' + playerName, 'Model contribution', 'win-detail', true)
   }
 }
 
