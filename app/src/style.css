@@ -428,6 +428,14 @@ code {
   border-color: #333;
 }
 
+.player-scorecard {
+  font-size: 14px;
+  color: var(--text);
+  padding: 8px 10px;
+  margin: 0;
+  line-height: 1.5;
+}
+
 .view-description {
   font-size: 13px;
   color: #888;

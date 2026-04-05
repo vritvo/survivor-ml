@@ -42,6 +42,7 @@ document.querySelector('#app').innerHTML = `
     <p class="section-desc">How the model evaluates a specific player.</p>
     <p id="player-empty-state" class="empty-state">Pick a player in the sidebar to explore how the model scores them.</p>
     <div id="player-charts" style="display:none;">
+      <p id="player-scorecard" class="player-scorecard"></p>
       <div class="detail-header">
         <div class="detail-controls">
           <label>View</label>
@@ -405,15 +406,81 @@ function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter)
   Plotly.newPlot(divId, trace, layout, { responsive: true })
 }
 
+function buildScorecard(data, player) {
+  // Compute win rank per episode for this player
+  const ranks = []
+  const elimRanks = []
+  player.episode.forEach((ep, i) => {
+    const episodePlayers = data.filter(p => p.episode.includes(ep))
+    // Win rank: higher prob = better = lower rank number
+    const winProbs = episodePlayers.map(p => p.prob_win[p.episode.indexOf(ep)])
+    const playerWinProb = player.prob_win[i]
+    const winRank = winProbs.filter(p => p > playerWinProb).length + 1
+    ranks.push(winRank)
+    // Elim rank: higher prob = worse = higher risk rank
+    const elimProbs = episodePlayers.map(p => p.prob_eliminated[p.episode.indexOf(ep)])
+    const playerElimProb = player.prob_eliminated[i]
+    const elimRank = elimProbs.filter(p => p > playerElimProb).length + 1
+    elimRanks.push(elimRank)
+  })
+
+  const bestWinRank = Math.min(...ranks)
+  const bestWinEp = player.episode[ranks.indexOf(bestWinRank)]
+  const timesTop1 = ranks.filter(r => r === 1).length
+  const timesTop3 = ranks.filter(r => r <= 3).length
+  const totalEps = ranks.length
+  const currentWinRank = ranks[ranks.length - 1]
+  const currentElimRank = elimRanks[elimRanks.length - 1]
+  const lastEp = player.episode[player.episode.length - 1]
+  const nPlayersLastEp = data.filter(p => p.episode.includes(lastEp)).length
+
+  const parts = []
+  parts.push('<strong>' + player.castaway + '</strong>')
+
+  if (player.won_season === 1) {
+    parts.push(' — Winner.')
+  } else {
+    const wasEliminated = player.eliminated_this_episode.includes(1)
+    if (wasEliminated) {
+      const elimEpIdx = player.eliminated_this_episode.indexOf(1)
+      parts.push(' — Eliminated Episode ' + player.episode[elimEpIdx] + '.')
+    } else {
+      parts.push(' — Still in the game.')
+    }
+  }
+
+  parts.push(' Best win rank: #' + bestWinRank + ' (Episode ' + bestWinEp + ').')
+  if (timesTop1 > 0) {
+    parts.push(' Ranked #1 for ' + timesTop1 + ' of ' + totalEps + ' episodes.')
+  }
+  if (timesTop3 > 0) {
+    parts.push(' Top 3 in ' + timesTop3 + ' of ' + totalEps + ' episodes.')
+  }
+  parts.push(' Latest win rank: #' + currentWinRank + ' of ' + nPlayersLastEp + '.')
+
+  return parts.join('')
+}
+
 function renderPlayerDetail(data, castawayId, episode) {
   const player = data.find(p => p.castaway_id === castawayId)
   if (!player) return
 
-  const epIdx = player.episode.indexOf(episode)
-  if (epIdx === -1) return
-
   document.getElementById("player-empty-state").style.display = "none"
   document.getElementById("player-charts").style.display = "block"
+
+  // Render scorecard (always shown, not episode-dependent)
+  document.getElementById("player-scorecard").innerHTML = buildScorecard(data, player)
+
+  const epIdx = player.episode.indexOf(episode)
+  if (epIdx === -1) {
+    const lastEp = player.episode[player.episode.length - 1]
+    document.getElementById("view-description").textContent =
+      player.castaway + ' was eliminated in Episode ' + lastEp +
+      ', but Episode ' + episode + ' is selected. Choose Episode ' + lastEp + ' or earlier to see their breakdown.'
+    Plotly.purge('elim-detail')
+    Plotly.purge('win-detail')
+    return
+  }
 
   const descEl = document.getElementById("view-description")
   if (currentView === 'bullet') {
