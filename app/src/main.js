@@ -44,7 +44,7 @@ document.querySelector('#app').innerHTML = `
     <div id="player-charts" style="display:none;">
       <p id="player-scorecard" class="player-scorecard"></p>
       <h3 class="subsection-title">Feature contributions over time</h3>
-      <p class="section-desc">How each feature's contribution changes episode by episode. Green-ish lines help the player; red-ish lines hurt them.</p>
+      <p class="section-desc">How each feature's contribution to the model score changes episode by episode. Positive values push the prediction higher; negative values push it lower.</p>
       <div class="chart-row">
         <div id="elim-timeline" class="chart"></div>
         <div id="win-timeline" class="chart"></div>
@@ -247,7 +247,8 @@ function renderBar(data, episode, probCol, title, divId) {
     x: sorted.map(d => d[probCol]),
     y: sorted.map(d => d.castaway),
     type: 'bar',
-    orientation: 'h'
+    orientation: 'h',
+    marker: { color: '#c8873a' }
   }]
 
   Plotly.newPlot(divId, trace, layout, { responsive: true })
@@ -364,7 +365,7 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
     const helpsPlayer = higherIsBetter ? contribution > 0 : contribution < 0
     dotX.push(dotPos)
     dotY.push(i)
-    dotColors.push(helpsPlayer ? '#2ecc71' : '#e74c3c')
+    dotColors.push(helpsPlayer ? '#3d8b6e' : '#c0604d')
     dotHover.push(label + ': ' + sortedPlayerVals[i].toFixed(2) + ' (avg: ' + sortedAvgs[i].toFixed(2) + ')')
   })
 
@@ -412,7 +413,7 @@ function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter)
   const sortedContributions = indices.map(i => contributions[i])
   const colors = sortedContributions.map(c => {
     const helpsPlayer = higherIsBetter ? c > 0 : c < 0
-    return helpsPlayer ? '#2ecc71' : '#e74c3c'
+    return helpsPlayer ? '#3d8b6e' : '#c0604d'
   })
 
   const trace = [{

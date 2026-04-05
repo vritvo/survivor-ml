@@ -1,13 +1,13 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
+  --text: #6b6058;
+  --text-h: #1a1410;
+  --bg: #fdfcfa;
+  --border: #e5e0da;
+  --code-bg: #f4f1ea;
+  --accent: #c8873a;
+  --accent-bg: rgba(200, 135, 58, 0.1);
+  --accent-border: rgba(200, 135, 58, 0.5);
+  --social-bg: rgba(244, 241, 234, 0.5);
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
@@ -32,15 +32,15 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
+    --text: #a09889;
+    --text-h: #f3efe8;
+    --bg: #1a1815;
+    --border: #342f28;
+    --code-bg: #23201a;
+    --accent: #d4a04a;
+    --accent-bg: rgba(212, 160, 74, 0.15);
+    --accent-border: rgba(212, 160, 74, 0.5);
+    --social-bg: rgba(52, 47, 40, 0.5);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
   }
@@ -166,6 +166,7 @@ code {
   width: 180px;
   padding: 24px 16px;
   border-right: 1px solid var(--border);
+  background: #faf7f2;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -174,6 +175,12 @@ code {
   top: 0;
   height: 100vh;
   overflow-y: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar {
+    background: #1e1b17;
+  }
 }
 
 .sidebar h1 {
@@ -407,10 +414,10 @@ code {
 .tab-btn {
   padding: 6px 14px;
   font-size: 13px;
-  border: 1px solid #ccc;
-  background: #f5f5f5;
+  border: 1px solid var(--border);
+  background: #f5f1ea;
   cursor: pointer;
-  color: #666;
+  color: var(--text);
 }
 
 .tab-btn:first-child {
@@ -423,9 +430,9 @@ code {
 }
 
 .tab-btn.active {
-  background: #333;
-  color: white;
-  border-color: #333;
+  background: #3d3028;
+  color: #faf7f2;
+  border-color: #3d3028;
 }
 
 .subsection-title {
@@ -435,11 +442,12 @@ code {
 }
 
 .player-scorecard {
-  font-size: 14px;
-  color: var(--text);
-  padding: 8px 10px;
-  margin: 0;
+  font-size: 15px;
+  color: var(--text-h);
+  padding: 10px 14px;
+  margin: 0 10px;
   line-height: 1.5;
+  border-left: 3px solid var(--accent);
 }
 
 .view-description {
