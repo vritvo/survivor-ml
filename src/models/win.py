@@ -426,6 +426,91 @@ def tune_hyperparameters(df: pd.DataFrame) -> float:
     return best["C"]
 
 
+def _export_season_json(
+    preds: pd.DataFrame,
+    target: pd.DataFrame,
+    target_season: int,
+    win_model: LogisticRegression,
+    win_scaler: StandardScaler,
+    elim_model: LogisticRegression,
+    elim_scaler: StandardScaler,
+) -> None:
+    """Build and save the season JSON for the web app.
+
+    Aggregates per-episode predictions into per-player records with feature
+    values, and includes model coefficients/scaler info for both models.
+    """
+    elim_display_features = [f for f in ELIM_FEATURE_COLS if f not in ("final_n",)]
+    all_export_features = list(FEATURE_COLS) + [f for f in elim_display_features if f not in FEATURE_COLS]
+
+    # Merge feature values onto predictions
+    feature_df = target[["season", "episode", "castaway_id"] + all_export_features].copy()
+    preds = preds.merge(feature_df, on=["season", "episode", "castaway_id"], how="left")
+
+    # Aggregate by castaway: one record per player with lists of per-episode values
+    agg_cols = {
+        'episode': lambda x: list(x),
+        'prob_win': lambda x: list(x),
+        'prob_eliminated': lambda x: list(x),
+        'eliminated_this_episode': lambda x: list(x),
+    }
+    for feat in all_export_features:
+        agg_cols[feat] = lambda x, f=feat: list(x)
+
+    agg = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg(agg_cols).reset_index()
+
+    players = []
+    for _, row in agg.iterrows():
+        players.append({
+            "season": int(row["season"]),
+            "castaway_id": row["castaway_id"],
+            "castaway": row["castaway"],
+            "won_season": int(row["won_season"]),
+            "episode": row["episode"],
+            "prob_win": row["prob_win"],
+            "prob_eliminated": row["prob_eliminated"],
+            "eliminated_this_episode": row["eliminated_this_episode"],
+            "win_features": {f: row[f] for f in FEATURE_COLS},
+            "elim_features": {f: row[f] for f in elim_display_features},
+        })
+
+    def _model_info(model, scaler, features):
+        return {
+            "features": features,
+            "coefficients": model.coef_[0].tolist(),
+            "intercept": model.intercept_[0],
+            "scaler_means": scaler.mean_.tolist(),
+            "scaler_stds": scaler.scale_.tolist(),
+        }
+
+    # For the elimination model, only export the display subset of features
+    elim_coef_indices = [ELIM_FEATURE_COLS.index(f) for f in elim_display_features]
+    elim_info = {
+        "features": elim_display_features,
+        "coefficients": [elim_model.coef_[0][i] for i in elim_coef_indices],
+        "intercept": elim_model.intercept_[0],
+        "scaler_means": [elim_scaler.mean_[i] for i in elim_coef_indices],
+        "scaler_stds": [elim_scaler.scale_[i] for i in elim_coef_indices],
+    }
+
+    season_data = {
+        "win_model_info": _model_info(win_model, win_scaler, FEATURE_COLS),
+        "elim_model_info": elim_info,
+        "players": players,
+    }
+
+    project_root = Path(__file__).parent.parent.parent
+    out_dir = project_root / "app" / "public" / "data" / "seasons"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / f"season_{target_season}.json", "w") as f:
+        json.dump(season_data, f)
+
+    # Update index of available seasons
+    seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
+    with open(out_dir / "index.json", "w") as f:
+        json.dump(seasons, f)
+
+
 def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     """
     Train on all seasons before target_season, return win predictions for that season. No evaluation.
@@ -437,7 +522,6 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     if target.empty:
         raise ValueError(f"No data found for season {target_season}")
 
-    # Generate elimination risk scores using only prior-season data
     train = add_elim_risk_oof(train)
     target, elim_model, elim_scaler = add_elim_risk(train, target)
 
@@ -447,73 +531,8 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     model, scaler = train_model(train)
     preds = predict(model, scaler, target)
 
-    # Merge feature values onto predictions so we can export them
-    # Include both win model features and elimination model features (excluding final_n which is shared context)
-    elim_display_features = [f for f in ELIM_FEATURE_COLS if f not in ("final_n",)]
-    all_export_features = list(FEATURE_COLS) + [f for f in elim_display_features if f not in FEATURE_COLS]
-    feature_df = target[["season", "episode", "castaway_id"] + all_export_features].copy()
-    preds = preds.merge(feature_df, on=["season", "episode", "castaway_id"], how="left")
+    _export_season_json(preds, target, target_season, model, scaler, elim_model, elim_scaler)
 
-    # Aggregate the predictions by castaway, getting a list of episodes and predictions for each castaway
-    agg_cols = {
-        'episode': lambda x: list(x),
-        'prob_win': lambda x: list(x),
-        'prob_eliminated': lambda x: list(x),
-        'eliminated_this_episode': lambda x: list(x),
-    }
-    # Add feature columns to aggregation (each becomes a list of per-episode values)
-    for feat in all_export_features:
-        agg_cols[feat] = lambda x, f=feat: list(x)
-
-    agg_preds = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg(agg_cols)
-    agg_preds = agg_preds.reset_index()
-
-    # Nest feature values under a "features" dict per player
-    players = []
-    for _, row in agg_preds.iterrows():
-        player = {
-            "season": int(row["season"]),
-            "castaway_id": row["castaway_id"],
-            "castaway": row["castaway"],
-            "won_season": int(row["won_season"]),
-            "episode": row["episode"],
-            "prob_win": row["prob_win"],
-            "prob_eliminated": row["prob_eliminated"],
-            "eliminated_this_episode": row["eliminated_this_episode"],
-            "win_features": {feat: row[feat] for feat in FEATURE_COLS},
-            "elim_features": {feat: row[feat] for feat in elim_display_features},
-        }
-        players.append(player)
-
-    # Build model info for this season's models
-    win_model_info = {
-        "features": FEATURE_COLS,
-        "coefficients": model.coef_[0].tolist(),
-        "intercept": model.intercept_[0],
-        "scaler_means": scaler.mean_.tolist(),
-        "scaler_stds": scaler.scale_.tolist(),
-    }
-    elim_model_info = {
-        "features": elim_display_features,
-        "coefficients": [elim_model.coef_[0][ELIM_FEATURE_COLS.index(f)] for f in elim_display_features],
-        "intercept": elim_model.intercept_[0],
-        "scaler_means": [elim_scaler.mean_[ELIM_FEATURE_COLS.index(f)] for f in elim_display_features],
-        "scaler_stds": [elim_scaler.scale_[ELIM_FEATURE_COLS.index(f)] for f in elim_display_features],
-    }
-
-    # Save to json for the web app
-    project_root = Path(__file__).parent.parent.parent
-    out_dir = project_root / "app" / "public" / "data" / "seasons"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / f"season_{target_season}.json", "w") as f:
-        json.dump({"win_model_info": win_model_info, "elim_model_info": elim_model_info, "players": players}, f)
-
-    # Update index of available seasons
-    seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
-    with open(out_dir / "index.json", "w") as f:
-        json.dump(seasons, f)
-
-    # Return the predictions as a DataFrame
     return preds
 
 
