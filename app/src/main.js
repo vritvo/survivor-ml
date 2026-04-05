@@ -43,6 +43,12 @@ document.querySelector('#app').innerHTML = `
     <p id="player-empty-state" class="empty-state">Pick a player in the sidebar to explore how the model scores them.</p>
     <div id="player-charts" style="display:none;">
       <p id="player-scorecard" class="player-scorecard"></p>
+      <h3 class="subsection-title">Feature contributions over time</h3>
+      <p class="section-desc">How each feature's contribution changes episode by episode. Green-ish lines help the player; red-ish lines hurt them.</p>
+      <div class="chart-row">
+        <div id="elim-timeline" class="chart"></div>
+        <div id="win-timeline" class="chart"></div>
+      </div>
       <div class="detail-header">
         <div class="detail-controls">
           <label>View</label>
@@ -51,12 +57,6 @@ document.querySelector('#app').innerHTML = `
             <button class="tab-btn" data-view="waterfall">Model contributions</button>
           </div>
         </div>
-      </div>
-      <h3 class="subsection-title">Feature contributions over time</h3>
-      <p class="section-desc">How each feature's contribution changes episode by episode. Green-ish lines help the player; red-ish lines hurt them.</p>
-      <div class="chart-row">
-        <div id="elim-timeline" class="chart"></div>
-        <div id="win-timeline" class="chart"></div>
       </div>
       <p id="view-description" class="view-description"></p>
       <div class="chart-row">
