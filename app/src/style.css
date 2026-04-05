@@ -428,6 +428,12 @@ code {
   border-color: #333;
 }
 
+.subsection-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 16px 10px 2px;
+}
+
 .player-scorecard {
   font-size: 14px;
   color: var(--text);

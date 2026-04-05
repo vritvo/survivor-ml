@@ -52,6 +52,12 @@ document.querySelector('#app').innerHTML = `
           </div>
         </div>
       </div>
+      <h3 class="subsection-title">Feature contributions over time</h3>
+      <p class="section-desc">How each feature's contribution changes episode by episode. Green-ish lines help the player; red-ish lines hurt them.</p>
+      <div class="chart-row">
+        <div id="elim-timeline" class="chart"></div>
+        <div id="win-timeline" class="chart"></div>
+      </div>
       <p id="view-description" class="view-description"></p>
       <div class="chart-row">
         <div id="elim-detail" class="chart"></div>
@@ -461,6 +467,59 @@ function buildScorecard(data, player) {
   return parts.join('')
 }
 
+function renderContributionTimeline(data, player, modelInfo, featuresKey, title, divId, higherIsBetter) {
+  if (!modelInfo) return
+
+  // Exclude final_n
+  const excludeFeatures = new Set(["final_n"])
+  const featureIndices = modelInfo.features
+    .map((f, i) => i)
+    .filter(i => !excludeFeatures.has(modelInfo.features[i]))
+  const features = featureIndices.map(i => modelInfo.features[i])
+  const coefficients = featureIndices.map(i => modelInfo.coefficients[i])
+  const scalerMeans = featureIndices.map(i => modelInfo.scaler_means[i])
+  const scalerStds = featureIndices.map(i => modelInfo.scaler_stds[i])
+
+  const playerFeatures = player[featuresKey] || player.features
+
+  // Distinct colors that are easy to tell apart
+  const palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+
+  const traces = features.map((f, i) => {
+    const contributions = player.episode.map((ep, epIdx) => {
+      const val = playerFeatures[f][epIdx]
+      const standardized = (val - scalerMeans[i]) / scalerStds[i]
+      return coefficients[i] * standardized
+    })
+    return {
+      name: FEATURE_LABELS[f] || f,
+      x: player.episode,
+      y: contributions,
+      mode: 'lines+markers',
+      marker: { size: 5 },
+      line: { color: palette[i % palette.length] },
+    }
+  })
+
+  const helpLabel = higherIsBetter ? 'Helps ↑' : 'Hurts ↑'
+  const hurtLabel = higherIsBetter ? 'Hurts ↓' : 'Helps ↓'
+
+  const layout = {
+    title: { text: title },
+    height: 400,
+    xaxis: { title: { text: 'Episode' }, dtick: 1 },
+    yaxis: { title: { text: 'Contribution' }, zeroline: true, zerolinewidth: 2, zerolinecolor: '#999' },
+    legend: { orientation: 'h', y: -0.25, font: { size: 10 } },
+    annotations: [
+      { x: 1.02, y: 1, xref: 'paper', yref: 'paper', text: helpLabel, showarrow: false, font: { size: 11, color: '#999' }, xanchor: 'left' },
+      { x: 1.02, y: 0, xref: 'paper', yref: 'paper', text: hurtLabel, showarrow: false, font: { size: 11, color: '#999' }, xanchor: 'left' },
+    ],
+    margin: { b: 120, l: 60, r: 70, t: 40 },
+  }
+
+  Plotly.newPlot(divId, traces, layout, { responsive: true })
+}
+
 function renderPlayerDetail(data, castawayId, episode) {
   const player = data.find(p => p.castaway_id === castawayId)
   if (!player) return
@@ -468,8 +527,10 @@ function renderPlayerDetail(data, castawayId, episode) {
   document.getElementById("player-empty-state").style.display = "none"
   document.getElementById("player-charts").style.display = "block"
 
-  // Render scorecard (always shown, not episode-dependent)
+  // Render scorecard and timelines (always shown, not episode-dependent)
   document.getElementById("player-scorecard").innerHTML = buildScorecard(data, player)
+  renderContributionTimeline(data, player, currentElimModelInfo, 'elim_features', 'Elimination contributions — ' + player.castaway, 'elim-timeline', false)
+  renderContributionTimeline(data, player, currentWinModelInfo, 'win_features', 'Win contributions — ' + player.castaway, 'win-timeline', true)
 
   const epIdx = player.episode.indexOf(episode)
   if (epIdx === -1) {
