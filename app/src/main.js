@@ -12,6 +12,12 @@ document.querySelector('#app').innerHTML = `
     <label for="episode-selector">Episode</label>
     <select id="episode-selector"></select>
   </div>
+  <div class="sidebar-control">
+    <label for="player-selector">Player</label>
+    <select id="player-selector">
+      <option value="">Select a player...</option>
+    </select>
+  </div>
 </nav>
 <main class="content">
   <div class="chart-row">
@@ -24,12 +30,6 @@ document.querySelector('#app').innerHTML = `
     <div id="win-by-episode" class="chart"></div>
   </div>
   <div class="detail-header">
-    <div class="detail-controls">
-      <label for="player-selector">Player</label>
-      <select id="player-selector">
-        <option value="">Select a player...</option>
-      </select>
-    </div>
     <div class="detail-controls">
       <label>View</label>
       <div class="tab-toggle">
