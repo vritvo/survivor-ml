@@ -19,22 +19,28 @@ document.querySelector('#app').innerHTML = `
       <option value="">Select a player...</option>
     </select>
   </div>
+  <div class="sidebar-control model-toggle-control">
+    <div class="tab-toggle">
+      <button class="tab-btn model-tab active" data-model="win">Win</button>
+      <button class="tab-btn model-tab" data-model="elim">Elimination</button>
+    </div>
+  </div>
 </nav>
-<main class="content">
+<main class="content show-win">
   <section class="dashboard-section">
     <h2 class="section-title">Season Trajectories</h2>
     <p class="section-desc">How each player's predicted probabilities change over the season.</p>
     <div class="chart-row">
-      <div id="elim-trajectory" class="chart"></div>
-      <div id="win-trajectory" class="chart"></div>
+      <div id="elim-trajectory" class="chart" data-model="elim"></div>
+      <div id="win-trajectory" class="chart" data-model="win"></div>
     </div>
   </section>
   <section class="dashboard-section">
     <h2 class="section-title">Episode Snapshot</h2>
     <p class="section-desc">Comparing all players in a single episode.</p>
     <div class="chart-row">
-      <div id="elim-by-episode" class="chart"></div>
-      <div id="win-by-episode" class="chart"></div>
+      <div id="elim-by-episode" class="chart" data-model="elim"></div>
+      <div id="win-by-episode" class="chart" data-model="win"></div>
     </div>
   </section>
   <section id="player-section" class="dashboard-section">
@@ -46,8 +52,8 @@ document.querySelector('#app').innerHTML = `
       <h3 class="subsection-title">Feature contributions over time</h3>
       <p class="section-desc">How each feature's contribution to the model score changes episode by episode. Positive values push the prediction higher; negative values push it lower.</p>
       <div class="chart-row">
-        <div id="elim-timeline" class="chart"></div>
-        <div id="win-timeline" class="chart"></div>
+        <div id="elim-timeline" class="chart" data-model="elim"></div>
+        <div id="win-timeline" class="chart" data-model="win"></div>
       </div>
       <div class="detail-header">
         <div class="detail-controls">
@@ -60,8 +66,8 @@ document.querySelector('#app').innerHTML = `
       </div>
       <p id="view-description" class="view-description"></p>
       <div class="chart-row">
-        <div id="elim-detail" class="chart"></div>
-        <div id="win-detail" class="chart"></div>
+        <div id="elim-detail" class="chart" data-model="elim"></div>
+        <div id="win-detail" class="chart" data-model="win"></div>
       </div>
     </div>
   </section>
@@ -93,6 +99,9 @@ let currentData = null
 let currentWinModelInfo = null
 let currentElimModelInfo = null
 let currentView = 'bullet'
+
+const MOBILE_BREAKPOINT = 768
+function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT }
 
 async function loadSeason(seasonNumber) {
   const response = await fetch('data/seasons/season_' + seasonNumber + '.json')
@@ -166,13 +175,14 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
   const yPad = (yMax - yMin) * 0.05
   const maxEp = Math.max(...data.flatMap(player => player.episode))
 
+  const mobile = isMobile()
   const layout = {
-    title: { text: title },
-    height: 600,
+    title: { text: title, font: { size: mobile ? 13 : 17 } },
+    height: mobile ? 350 : 600,
     xaxis: { title: { text: "Episode" }, dtick: 1, range: [0.5, maxEp + 0.5], autorange: false },
     yaxis: { title: { text: yLabel }, tickformat: ".0%", range: [yMin - yPad, yMax + yPad], autorange: false },
-    legend: { orientation: 'h', y: -0.15, font: { size: 10 } },
-    margin: { b: 150 }
+    legend: { orientation: 'h', y: mobile ? -0.3 : -0.15, font: { size: mobile ? 9 : 10 } },
+    margin: { b: mobile ? 100 : 150, l: mobile ? 50 : 80, r: mobile ? 10 : 80, t: mobile ? 30 : 40 }
   }
 
   const traces = []
@@ -232,12 +242,13 @@ function getEpisodeData(data, episode) {
 }
 
 function renderBar(data, episode, probCol, title, divId) {
+  const mobile = isMobile()
   const layout = {
-    title: { text: title },
-    height: 500,
+    title: { text: title, font: { size: mobile ? 13 : 17 } },
+    height: mobile ? 350 : 500,
     xaxis: { title: { text: "Probability" }, tickformat: ".0%" },
-    yaxis: { title: { text: "Player" } },
-    margin: { l: 100, t: 40 }
+    yaxis: { title: { text: "Player" }, tickfont: { size: mobile ? 10 : 12 } },
+    margin: { l: mobile ? 80 : 100, t: mobile ? 30 : 40, r: mobile ? 10 : 80 }
   }
 
   const epData = getEpisodeData(data, episode)
@@ -379,14 +390,16 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
     showlegend: false,
   }]
 
+  const mobile = isMobile()
   const numFeatures = sortedLabels.length
   const layout = {
-    title: { text: title },
-    height: 350,
+    title: { text: title, font: { size: mobile ? 12 : 17 } },
+    height: mobile ? 300 : 350,
     xaxis: { visible: false, range: [-1.1, 1.1], zeroline: false, showgrid: false },
     yaxis: {
       tickvals: sortedLabels.map((_, i) => i),
       ticktext: sortedLabels,
+      tickfont: { size: mobile ? 10 : 12 },
       autorange: 'reversed',
       automargin: true,
       showgrid: false,
@@ -394,10 +407,10 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
     },
     shapes: shapes,
     annotations: [
-      { x: -0.9, y: numFeatures - 0.5, yref: 'y', xref: 'x', text: '← Below avg', showarrow: false, font: { size: 11, color: '#999' }, yanchor: 'top' },
-      { x: 0.9, y: numFeatures - 0.5, yref: 'y', xref: 'x', text: 'Above avg →', showarrow: false, font: { size: 11, color: '#999' }, yanchor: 'top' },
+      { x: -0.9, y: numFeatures - 0.5, yref: 'y', xref: 'x', text: '← Below avg', showarrow: false, font: { size: mobile ? 9 : 11, color: '#999' }, yanchor: 'top' },
+      { x: 0.9, y: numFeatures - 0.5, yref: 'y', xref: 'x', text: 'Above avg →', showarrow: false, font: { size: mobile ? 9 : 11, color: '#999' }, yanchor: 'top' },
     ],
-    margin: { l: 200, r: 20, t: 40, b: 30 },
+    margin: { l: mobile ? 120 : 200, r: mobile ? 10 : 20, t: mobile ? 30 : 40, b: 30 },
   }
 
   Plotly.newPlot(divId, traces, layout, { responsive: true })
@@ -425,12 +438,13 @@ function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter)
     hovertemplate: '%{y}: %{x:.3f}<extra></extra>',
   }]
 
+  const mobile = isMobile()
   const layout = {
-    title: { text: title },
-    height: 350,
+    title: { text: title, font: { size: mobile ? 12 : 17 } },
+    height: mobile ? 300 : 350,
     xaxis: { title: { text: xLabel }, zeroline: true, zerolinewidth: 2 },
-    yaxis: { automargin: true },
-    margin: { l: 200, r: 20, t: 40, b: 40 },
+    yaxis: { automargin: true, tickfont: { size: mobile ? 10 : 12 } },
+    margin: { l: mobile ? 120 : 200, r: mobile ? 10 : 20, t: mobile ? 30 : 40, b: 40 },
   }
 
   Plotly.newPlot(divId, trace, layout, { responsive: true })
@@ -525,20 +539,21 @@ function renderContributionTimeline(data, player, modelInfo, featuresKey, title,
     }
   })
 
+  const mobile = isMobile()
   const helpLabel = higherIsBetter ? 'Helps ↑' : 'Hurts ↑'
   const hurtLabel = higherIsBetter ? 'Hurts ↓' : 'Helps ↓'
 
   const layout = {
-    title: { text: title },
-    height: 400,
+    title: { text: title, font: { size: mobile ? 12 : 17 } },
+    height: mobile ? 300 : 400,
     xaxis: { title: { text: 'Episode' }, dtick: 1 },
     yaxis: { title: { text: 'Contribution' }, zeroline: true, zerolinewidth: 2, zerolinecolor: '#999' },
-    legend: { orientation: 'h', y: -0.25, font: { size: 10 } },
-    annotations: [
+    legend: { orientation: 'h', y: mobile ? -0.4 : -0.25, font: { size: mobile ? 9 : 10 } },
+    annotations: mobile ? [] : [
       { x: 1.02, y: 1, xref: 'paper', yref: 'paper', text: helpLabel, showarrow: false, font: { size: 11, color: '#999' }, xanchor: 'left' },
       { x: 1.02, y: 0, xref: 'paper', yref: 'paper', text: hurtLabel, showarrow: false, font: { size: 11, color: '#999' }, xanchor: 'left' },
     ],
-    margin: { b: 120, l: 60, r: 70, t: 40 },
+    margin: { b: mobile ? 80 : 120, l: mobile ? 45 : 60, r: mobile ? 10 : 70, t: mobile ? 30 : 40 },
   }
 
   Plotly.newPlot(divId, traces, layout, { responsive: true })
@@ -571,7 +586,7 @@ function renderPlayerDetail(data, castawayId, episode) {
   if (currentView === 'bullet') {
     descEl.textContent = VIEW_DESCRIPTIONS.bullet
   } else {
-    descEl.textContent = "Green = helps the player's chances; red = hurts them. Left chart: elimination risk. Right chart: win probability."
+    descEl.textContent = "Green = helps the player's chances; red = hurts them."
   }
 
   const elimData = currentElimModelInfo
@@ -635,6 +650,18 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       const episode = Number(document.getElementById("episode-selector").value)
       renderPlayerDetail(currentData, playerId, episode)
     }
+  })
+})
+
+// Model toggle (mobile only, but wired up always)
+document.querySelectorAll('.model-tab').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.model-tab').forEach(b => b.classList.remove('active'))
+    this.classList.add('active')
+    const model = this.dataset.model
+    const content = document.querySelector('.content')
+    content.classList.remove('show-win', 'show-elim')
+    content.classList.add('show-' + model)
   })
 })
 
