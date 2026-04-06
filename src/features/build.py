@@ -18,6 +18,78 @@ _NEUTRAL_EVENTS = {
     "Became steal a vote", "Absorbed",
 }
 
+# Boot Mapping statuses indicating a player has left the main game
+_EXIT_STATUSES = {"Redemption Island", "Edge of Extinction", "Returned"}
+
+
+def _detect_interim_eliminations(bm_us: pd.DataFrame) -> pd.DataFrame:
+    """Find episodes where a player was eliminated but later returned or went to RI/EoE.
+
+    The Castaways table only records each player's final result, so first eliminations
+    of returnees (Redemption Island, Edge of Extinction, Outcasts) are invisible.
+    This detects them via two Boot Mapping patterns:
+
+    1. Status transitions: "In the game" followed by RI / EoE / Returned
+    2. Complete absence: player missing from Boot Mapping entirely for 1+ episodes
+       then reappears as "In the game" (S7 Outcasts twist)
+
+    Returns DataFrame with columns: season, castaway_id, episode (the elimination episode).
+    """
+    bm_sorted = bm_us.sort_values(["season", "castaway_id", "episode", "order"])
+    bm_dedup = bm_sorted.drop_duplicates(
+        subset=["season", "episode", "castaway_id"], keep="first"
+    ).copy()
+
+    # Pattern 1: game_status transitions away from "In the game"
+    bm_dedup["_next_status"] = bm_dedup.groupby(
+        ["season", "castaway_id"]
+    )["game_status"].shift(-1)
+
+    transitions = bm_dedup[
+        (bm_dedup["game_status"] == "In the game")
+        & bm_dedup["_next_status"].isin(_EXIT_STATUSES)
+    ][["season", "castaway_id", "episode"]]
+
+    # Pattern 2: player completely absent from Boot Mapping for 1+ real episodes
+    # then reappears as "In the game" (S7 Outcasts — no RI/EoE status exists).
+    # Only flags gaps where the player has NO Boot Mapping rows at all during the
+    # gap period, to avoid false-flagging Exile Island visits.
+    in_game = bm_dedup[bm_dedup["game_status"] == "In the game"].copy()
+    in_game["_next_ep"] = in_game.groupby(
+        ["season", "castaway_id"]
+    )["episode"].shift(-1)
+
+    all_season_eps = bm_dedup.groupby("season")["episode"].apply(set).to_dict()
+
+    gap_candidates = in_game[
+        in_game["_next_ep"].notna() & (in_game["_next_ep"] > in_game["episode"] + 1)
+    ]
+
+    gaps = []
+    for _, row in gap_candidates.iterrows():
+        gap_eps = set(range(int(row["episode"]) + 1, int(row["_next_ep"])))
+        if not (gap_eps & all_season_eps.get(row["season"], set())):
+            continue
+        player_gap_rows = bm_us[
+            (bm_us["season"] == row["season"])
+            & (bm_us["castaway_id"] == row["castaway_id"])
+            & (bm_us["episode"].isin(gap_eps))
+        ]
+        if player_gap_rows.empty:
+            gaps.append({
+                "season": row["season"],
+                "castaway_id": row["castaway_id"],
+                "episode": row["episode"],
+            })
+
+    gaps_df = (
+        pd.DataFrame(gaps) if gaps
+        else pd.DataFrame(columns=["season", "castaway_id", "episode"])
+    )
+
+    return pd.concat([transitions, gaps_df], ignore_index=True).drop_duplicates(
+        subset=["season", "castaway_id", "episode"]
+    )
 
 
 def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -27,10 +99,10 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     Deduplication: episodes with multiple tribals create duplicate rows. We keep the 
     keep the first occurrence per episode to represent the players state at the start. 
     
-    Target: eliminated_this_episode = 1 if the player was eliminated in this episode (derived
-    from Castaways table). 
-    
-    
+    Target: eliminated_this_episode = 1 if the player was eliminated in this episode.
+    Primary source is the Castaways table (final results). Supplemented by Boot Mapping
+    transition detection for interim eliminations (Redemption Island, Edge of Extinction,
+    Outcasts) where a player was voted out and later returned.
     """
     bm = data["Boot Mapping"]
     castaways = data["Castaways"]
@@ -61,6 +133,18 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     skel = skel.merge(eliminated, on=["season", "castaway_id"], how="left")
     skel["eliminated_this_episode"] = (skel["episode"] == skel["elim_episode"]).astype(int)
     skel = skel.drop(columns=["elim_episode"])
+
+    # Supplement with interim eliminations for returnees (RI, EoE, Outcasts).
+    # The Castaways table only records final results, so first eliminations of
+    # players who later returned are invisible without this step.
+    bm_us = bm[bm["version"] == "US"]
+    interim = _detect_interim_eliminations(bm_us)
+    interim = interim.assign(_interim=1)
+    skel = skel.merge(interim, on=["season", "castaway_id", "episode"], how="left")
+    skel["eliminated_this_episode"] = (
+        skel["eliminated_this_episode"] | skel["_interim"].fillna(0).astype(int)
+    )
+    skel = skel.drop(columns=["_interim"])
 
     # Build target variable "won_season" from Castaways table. 
     won_season = us_castaways[us_castaways["winner"] == 1.0][["season", "castaway_id", "winner"]].rename(columns={"winner": "won_season"})
