@@ -345,6 +345,13 @@ def _build_holding_periods(advantage_events: pd.DataFrame) -> pd.DataFrame:
                     current_holder = None
                     start_ep = None
 
+        if current_holder is not None:
+            periods.append({
+                "season": season, "advantage_id": adv_id,
+                "castaway_id": current_holder,
+                "start_ep": start_ep, "end_ep": float("inf"),
+            })
+
     return pd.DataFrame(periods)
 
 
