@@ -71,6 +71,11 @@ document.querySelector('#app').innerHTML = `
       </div>
     </div>
   </section>
+  <footer class="site-footer">
+    <a href="https://victoriaritvo.com/projects/survivor-ml/" target="_blank" rel="noopener noreferrer">About</a>
+    <span class="footer-sep">&middot;</span>
+    <a href="https://github.com/vritvo/survivor-ml" target="_blank" rel="noopener noreferrer">GitHub</a>
+  </footer>
 </main>
 
 `

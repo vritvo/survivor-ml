@@ -519,3 +519,27 @@ code {
   padding: 0 10px;
   margin: 0 0 12px 0;
 }
+
+.site-footer {
+  margin-top: 32px;
+  padding: 20px 10px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.site-footer a {
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.site-footer a:hover {
+  color: var(--accent);
+}
+
+.footer-sep {
+  margin: 0 8px;
+  color: var(--border);
+}
