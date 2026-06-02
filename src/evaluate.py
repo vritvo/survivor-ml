@@ -5,6 +5,57 @@ import numpy as np
 from typing import Callable
 
 
+def cluster_bootstrap_ci(
+    df: pd.DataFrame,
+    cluster_col: str,
+    stat_fn: Callable[[pd.DataFrame], dict],
+    n_boot: int = 2000,
+    ci: float = 95,
+    seed: int = 42,
+) -> dict:
+    """Cluster bootstrap confidence intervals.
+
+    Resamples whole clusters (e.g. seasons) with replacement, recomputing
+    stat_fn on each resample. Resampling at the cluster level — rather than
+    the individual row — preserves within-cluster correlation, so it gives
+    honest CIs for metrics pooled across correlated observations (e.g. the
+    many episodes within a season).
+
+    Args:
+        df: Data with one or more rows per cluster.
+        cluster_col: Column identifying the cluster (e.g. "season").
+        stat_fn: Takes a DataFrame, returns a dict of named scalar metrics.
+        n_boot: Number of bootstrap resamples.
+        ci: Confidence level (percent).
+        seed: RNG seed.
+
+    Returns:
+        Dict mapping each metric name to {"point", "lo", "hi"}.
+    """
+    rng = np.random.default_rng(seed)
+    clusters = df[cluster_col].unique()
+    groups = {c: g for c, g in df.groupby(cluster_col)}
+
+    point = stat_fn(df)
+    boot: dict[str, list] = {k: [] for k in point}
+
+    for _ in range(n_boot):
+        sampled = rng.choice(clusters, size=len(clusters), replace=True)
+        resampled = pd.concat([groups[c] for c in sampled], ignore_index=True)
+        res = stat_fn(resampled)
+        for k, v in res.items():
+            boot[k].append(v)
+
+    alpha = (100 - ci) / 2
+    out = {}
+    for k in point:
+        arr = np.asarray(boot[k], dtype=float)
+        lo, hi = np.percentile(arr, [alpha, 100 - alpha])
+        out[k] = {"point": point[k], "lo": lo, "hi": hi}
+
+    return out
+
+
 def expanding_window_cv(
     df: pd.DataFrame,
     train_and_evaluate_fn: Callable[[pd.DataFrame, pd.DataFrame], dict],
