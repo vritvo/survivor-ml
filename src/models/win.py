@@ -58,8 +58,6 @@ FEATURE_COLS = [
     # "confessional_share_last_ep", 
     "confessional_share_rolling_3", #
     # "confessional_share_cumulative",
-    # "elim_risk",
-    "elim_risk_rank", #
 ]
 
 TARGET_COL = "won_season"
@@ -69,56 +67,20 @@ TEST_SEASONS = range(41, 51)
 
 C = 0.5
 
-# All columns that must be non-null before we can generate elim_risk
-_BASE_FEATURES = [f for f in FEATURE_COLS if f not in ("elim_risk", "elim_risk_rank")]
-_ALL_NEEDED = list(set(_BASE_FEATURES) | set(ELIM_FEATURE_COLS))
+# The win model no longer uses any elim-derived feature. But predict_season still runs the
+# elimination model, so its inputs must be
+# non-null too. keep ELIM_FEATURE_COLS in the preprocessing set.
+_ALL_NEEDED = list(set(FEATURE_COLS) | set(ELIM_FEATURE_COLS))
 
 
 # --- Elimination risk scores ---
 
 def _normalize_elim_risk(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize elim_risk within each episode so scores sum to 1, and add rank."""
+    """Normalize elim_risk within each episode so scores sum to 1 (for the app's
+    elimination panel)."""
     ep_sums = df.groupby(["season", "episode"])["elim_risk"].transform("sum")
     df["elim_risk"] = df["elim_risk"] / ep_sums
-    # Rank within episode: 1 = most likely to be eliminated
-    df["elim_risk_rank"] = df.groupby(["season", "episode"])["elim_risk"].rank(ascending=False)
     return df
-
-
-def add_elim_risk_oof(train_df: pd.DataFrame) -> pd.DataFrame:
-    """Generate out-of-fold elimination risk scores using an expanding window.
-
-    For each season S in train_df, trains the elimination model on all
-    seasons prior to S and predicts on S. Season 1 (no prior data) gets
-    uniform 1/N scores. This mirrors real-world deployment and avoids
-    data leakage from in-sample predictions.
-    """
-    result = train_df.copy()
-    result["elim_risk"] = np.nan
-
-    seasons = sorted(train_df["season"].unique())
-
-    for i, season in enumerate(seasons):
-        season_mask = result["season"] == season
-        prior_seasons = seasons[:i]
-
-        # No prior seasons to train on — assign uniform 1/N
-        if not prior_seasons:
-            n_per_ep = result.loc[season_mask].groupby(
-                ["season", "episode"]
-            )["season"].transform("count")
-            result.loc[season_mask, "elim_risk"] = 1.0 / n_per_ep
-            continue
-
-        # Train elim model on seasons 1..S-1, predict on season S
-        prior_data = train_df[train_df["season"].isin(prior_seasons)]
-        elim_model, elim_scaler = train_elim_model(prior_data)
-
-        X = elim_scaler.transform(result.loc[season_mask, ELIM_FEATURE_COLS])
-        probs = elim_model.predict_proba(X)[:, 1]
-        result.loc[season_mask, "elim_risk"] = probs
-
-    return _normalize_elim_risk(result)
 
 
 def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> tuple[pd.DataFrame, object, object]:
@@ -322,32 +284,21 @@ def metrics_by_episode_number(predictions: pd.DataFrame) -> pd.DataFrame:
 # --- Full pipeline ---
 
 def _make_train_and_evaluate(feature_cols: list[str] | None = None, **kwargs):
-    """Create a train-and-evaluate callback for use with expanding_window_cv.
-
-    Each fold freshly generates elimination risk scores (out-of-fold for train,
-    in-fold for test) before training the win model, preventing leakage.
-    """
+    """Create a train-and-evaluate callback for use with expanding_window_cv."""
     def fn(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
-        train_df = add_elim_risk_oof(train_df)
-        test_df, _, _ = add_elim_risk(train_df, test_df)
         model, scaler = train_model(train_df, feature_cols=feature_cols, **kwargs)
         return predict_and_evaluate(model, scaler, test_df, feature_cols=feature_cols)
     return fn
 
 
 def train_eval_pipeline(df: pd.DataFrame) -> dict:
-    """Run the full pipeline: preprocess -> split -> generate risk scores -> train -> evaluate.
+    """Run the full pipeline: preprocess -> split -> train -> evaluate.
 
     Single fixed split (TRAIN_SEASONS vs TEST_SEASONS). For a more robust
     estimate, use cross_validate() which averages over multiple splits.
     """
     df = preprocess(df, _ALL_NEEDED)
     train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
-
-    # Generate elimination risk as a feature: out-of-fold for train (no leakage),
-    # then train a fresh elim model on all train data to score test.
-    train = add_elim_risk_oof(train)
-    test, _, _ = add_elim_risk(train, test)
 
     print(f"Train: {len(train):,} rows ({train['season'].nunique()} seasons)")
     print(f"Test:  {len(test):,} rows ({test['season'].nunique()} seasons)")
@@ -523,7 +474,8 @@ def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
     if target.empty:
         raise ValueError(f"No data found for season {target_season}")
 
-    train = add_elim_risk_oof(train)
+    # The win model doesn't use elim risk anymore, but the app's elimination panel
+    # does: train the elimination model on prior seasons and score the target.
     target, elim_model, elim_scaler = add_elim_risk(train, target)
 
     print(f"Training on seasons 1-{target_season - 1} ({len(train):,} rows), "

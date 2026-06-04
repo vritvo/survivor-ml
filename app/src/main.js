@@ -88,7 +88,6 @@ const FEATURE_LABELS = {
   "times_in_danger": "Times in danger",
   "final_n": "Players remaining",
   "confessional_share_rolling_3": "Confessional share (rolling 3)",
-  "elim_risk_rank": "Elimination risk rank",
   "mbti_feeling": "Personality: Feeling",
   "advantages_held": "Advantages held",
   "individual_immunity_wins": "Individual immunity wins",
