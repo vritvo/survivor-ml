@@ -5,16 +5,15 @@ Usage:
     python -m src.models.win                  # train & evaluate (single split + CV)
     python -m src.models.win --tune           # hyperparameter grid search
     python -m src.models.win --select         # forward feature selection
-    python -m src.models.win --predict 50     # predict a specific season (e.g. season 50)
+    python -m src.models.win --predict 50     # win predictions for a season
 
-For predicting a specific season, use predict_season(df, target_season) from code/notebook.
+This module is the standalone win model. The app's per-season JSON (which combines
+this model with the elimination model) is produced by `src/export.py`.
 """
 
 import argparse
 import pandas as pd
 import numpy as np
-import json
-from pathlib import Path
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss
@@ -22,10 +21,6 @@ from src.load import load_data
 from src.features.build import build_modeling_table
 from src.evaluate import expanding_window_cv, forward_selection
 from src.models.utils import preprocess, split_by_season
-from src.models.elimination import (
-    train_model as train_elim_model,
-    FEATURE_COLS as ELIM_FEATURE_COLS,
-)
 
 # --- Configuration ---
 
@@ -67,35 +62,6 @@ TEST_SEASONS = range(41, 51)
 
 C = 0.5
 
-# The win model no longer uses any elim-derived feature. But predict_season still runs the
-# elimination model, so its inputs must be
-# non-null too. keep ELIM_FEATURE_COLS in the preprocessing set.
-_ALL_NEEDED = list(set(FEATURE_COLS) | set(ELIM_FEATURE_COLS))
-
-
-# --- Elimination risk scores ---
-
-def _normalize_elim_risk(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize elim_risk within each episode so scores sum to 1 (for the app's
-    elimination panel)."""
-    ep_sums = df.groupby(["season", "episode"])["elim_risk"].transform("sum")
-    df["elim_risk"] = df["elim_risk"] / ep_sums
-    return df
-
-
-def add_elim_risk(train_df: pd.DataFrame, predict_df: pd.DataFrame) -> tuple[pd.DataFrame, object, object]:
-    """Train elimination model on train_df, add normalized P(eliminated) to predict_df.
-
-    Returns (predict_df_with_risk, elim_model, elim_scaler).
-    """
-    elim_model, elim_scaler = train_elim_model(train_df)
-    X = elim_scaler.transform(predict_df[ELIM_FEATURE_COLS])
-    probs = elim_model.predict_proba(X)[:, 1]
-
-    result = predict_df.copy()
-    result["elim_risk"] = probs
-    return _normalize_elim_risk(result), elim_model, elim_scaler
-
 
 # --- Training ---
 
@@ -135,18 +101,14 @@ def predict(
     probs = model.predict_proba(X)[:, 1]  # P(won_season)
 
     id_cols = ["season", "episode", "castaway_id", "castaway"]
-    
-    # Carry through elim_risk (as prob_eliminated) and eliminated_this_episode if present.
-    extra_cols = [TARGET_COL, "eliminated_this_episode", "elim_risk"]
+
+    # Carry through label columns downstream consumers expect, if present.
+    extra_cols = [TARGET_COL, "eliminated_this_episode"]
     for col in extra_cols:
         if col in df.columns and col not in id_cols:
             id_cols.append(col)
     preds = df[id_cols].copy()
     preds["prob_win"] = probs
-
-    # Rename elim_risk to prob_eliminated if it exists.
-    if "elim_risk" in preds.columns:
-        preds = preds.rename(columns={"elim_risk": "prob_eliminated"})
 
     # Normalize so probabilities sum to 1 across players in each episode
     episode_sums = preds.groupby(["season", "episode"])["prob_win"].transform("sum")
@@ -297,7 +259,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     Single fixed split (TRAIN_SEASONS vs TEST_SEASONS). For a more robust
     estimate, use cross_validate() which averages over multiple splits.
     """
-    df = preprocess(df, _ALL_NEEDED)
+    df = preprocess(df, FEATURE_COLS)
     train, test = split_by_season(df, TRAIN_SEASONS, TEST_SEASONS)
 
     print(f"Train: {len(train):,} rows ({train['season'].nunique()} seasons)")
@@ -317,7 +279,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     # Show which features the model relies on most
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
     coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
-    print(f"\nFeature coefficients (ordered by absolute value):")
+    print("\nFeature coefficients (ordered by absolute value):")
     for name, coef in coef_tuples_sorted:
         print(f"  {name:45s} {coef:+.4f}")
 
@@ -329,10 +291,10 @@ def cross_validate(df: pd.DataFrame) -> dict:
 
     Each fold trains on all seasons up to some cutoff, then tests on the next test_window seasons.
     """
-    df = preprocess(df, _ALL_NEEDED)
+    df = preprocess(df, FEATURE_COLS)
 
     print(f"Features: {FEATURE_COLS}")
-    print(f"Running expanding-window CV...\n")
+    print("Running expanding-window CV...\n")
 
     cv_results = expanding_window_cv(df, _make_train_and_evaluate(feature_cols=FEATURE_COLS))
 
@@ -356,7 +318,7 @@ def tune_hyperparameters(df: pd.DataFrame) -> float:
 
     Returns best_C. Selects by lowest mean winner rank (lower = better).
     """
-    df = preprocess(df, _ALL_NEEDED)
+    df = preprocess(df, FEATURE_COLS)
 
     C_values = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
 
@@ -378,120 +340,30 @@ def tune_hyperparameters(df: pd.DataFrame) -> float:
     return best["C"]
 
 
-def _export_season_json(
-    preds: pd.DataFrame,
-    target: pd.DataFrame,
-    target_season: int,
-    win_model: LogisticRegression,
-    win_scaler: StandardScaler,
-    elim_model: LogisticRegression,
-    elim_scaler: StandardScaler,
-) -> None:
-    """Build and save the season JSON for the web app.
-
-    Aggregates per-episode predictions into per-player records with feature
-    values, and includes model coefficients/scaler info for both models.
-    """
-    elim_display_features = [f for f in ELIM_FEATURE_COLS if f not in ("final_n",)]
-    all_export_features = list(FEATURE_COLS) + [f for f in elim_display_features if f not in FEATURE_COLS]
-
-    # Merge feature values onto predictions
-    feature_df = target[["season", "episode", "castaway_id"] + all_export_features].copy()
-    preds = preds.merge(feature_df, on=["season", "episode", "castaway_id"], how="left")
-
-    # Aggregate by castaway: one record per player with lists of per-episode values
-    agg_cols = {
-        'episode': lambda x: list(x),
-        'prob_win': lambda x: list(x),
-        'prob_eliminated': lambda x: list(x),
-        'eliminated_this_episode': lambda x: list(x),
-    }
-    for feat in all_export_features:
-        agg_cols[feat] = lambda x, f=feat: list(x)
-
-    agg = preds.groupby(["season", "castaway_id", "castaway", "won_season"]).agg(agg_cols).reset_index()
-
-    players = []
-    for _, row in agg.iterrows():
-        players.append({
-            "season": int(row["season"]),
-            "castaway_id": row["castaway_id"],
-            "castaway": row["castaway"],
-            "won_season": int(row["won_season"]),
-            "episode": row["episode"],
-            "prob_win": row["prob_win"],
-            "prob_eliminated": row["prob_eliminated"],
-            "eliminated_this_episode": row["eliminated_this_episode"],
-            "win_features": {f: row[f] for f in FEATURE_COLS},
-            "elim_features": {f: row[f] for f in elim_display_features},
-        })
-
-    def _model_info(model, scaler, features):
-        return {
-            "features": features,
-            "coefficients": model.coef_[0].tolist(),
-            "intercept": model.intercept_[0],
-            "scaler_means": scaler.mean_.tolist(),
-            "scaler_stds": scaler.scale_.tolist(),
-        }
-
-    # For the elimination model, only export the display subset of features
-    elim_coef_indices = [ELIM_FEATURE_COLS.index(f) for f in elim_display_features]
-    elim_info = {
-        "features": elim_display_features,
-        "coefficients": [elim_model.coef_[0][i] for i in elim_coef_indices],
-        "intercept": elim_model.intercept_[0],
-        "scaler_means": [elim_scaler.mean_[i] for i in elim_coef_indices],
-        "scaler_stds": [elim_scaler.scale_[i] for i in elim_coef_indices],
-    }
-
-    season_data = {
-        "win_model_info": _model_info(win_model, win_scaler, FEATURE_COLS),
-        "elim_model_info": elim_info,
-        "players": players,
-    }
-
-    project_root = Path(__file__).parent.parent.parent
-    out_dir = project_root / "app" / "public" / "data" / "seasons"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / f"season_{target_season}.json", "w") as f:
-        json.dump(season_data, f)
-
-    # Update index of available seasons
-    seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
-    with open(out_dir / "index.json", "w") as f:
-        json.dump(seasons, f)
-
-
 def predict_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
+    """Train on all seasons before target_season, return win predictions for that
+    season (no evaluation, no app export).
+
+    For the app's per-season JSON (which also runs the elimination model and writes
+    the file), use `export_season` in `src/export.py`.
     """
-    Train on all seasons before target_season, return win predictions for that season. No evaluation.
-    """
-    df = preprocess(df, _ALL_NEEDED)
+    df = preprocess(df, FEATURE_COLS)
     train = df[df["season"] < target_season]
     target = df[df["season"] == target_season]
 
     if target.empty:
         raise ValueError(f"No data found for season {target_season}")
 
-    # The win model doesn't use elim risk anymore, but the app's elimination panel
-    # does: train the elimination model on prior seasons and score the target.
-    target, elim_model, elim_scaler = add_elim_risk(train, target)
-
     print(f"Training on seasons 1-{target_season - 1} ({len(train):,} rows), "
           f"predicting season {target_season} ({len(target):,} rows)")
 
     model, scaler = train_model(train)
-    preds = predict(model, scaler, target)
-
-    _export_season_json(preds, target, target_season, model, scaler, elim_model, elim_scaler)
-
-    return preds
+    return predict(model, scaler, target)
 
 
 def run_forward_selection(df: pd.DataFrame) -> dict:
     """Run forward feature selection and print results."""
-    df = preprocess(df, _ALL_NEEDED)
+    df = preprocess(df, FEATURE_COLS)
 
     def make_cv_callback(features: list[str]):
         return _make_train_and_evaluate(feature_cols=features)
@@ -531,8 +403,13 @@ if __name__ == "__main__":
         print("=== Forward feature selection ===\n")
         run_forward_selection(df)
     elif args.predict:
-        print(f"=== Predicting season {args.predict} ===\n")
-        predict_season(df, args.predict)
+        print(f"=== Predicting season {args.predict} (win model only) ===\n")
+        preds = predict_season(df, args.predict)
+        last_ep = preds["episode"].max()
+        top = preds[preds["episode"] == last_ep].sort_values("prob_win", ascending=False)
+        print(f"\nTop win picks, episode {last_ep}:")
+        for _, r in top.head(5).iterrows():
+            print(f"  {r['castaway']:24s} {r['prob_win']:.1%}")
     else:
         print("=== Single split ===\n")
         results = train_eval_pipeline(df)

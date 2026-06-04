@@ -4,7 +4,7 @@ import urllib.request
 
 from src.load import load_data
 from src.features.build import build_modeling_table
-from src.models.win import predict_season
+from src.export import export_all_seasons
 
 DATA_URL = "https://github.com/doehm/survivoR/raw/refs/heads/master/dev/xlsx/survivoR.xlsx"
 DATA_PATH = Path("data/survivoR.xlsx")
@@ -26,10 +26,7 @@ def main():
 
     data = load_data()
     df = build_modeling_table(data)
-    max_season = int(data["Episodes"][data["Episodes"]["version"] == "US"]["season"].max())
-    for season in range(2, max_season + 1):
-        print(f"\n=== Season {season}/{max_season} ===")
-        predictions = predict_season(df, season)
+    export_all_seasons(df)
 
 if __name__ == "__main__":
     main()
