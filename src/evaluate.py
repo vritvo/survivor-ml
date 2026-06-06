@@ -185,6 +185,59 @@ def summarize_winner_picks(
     return agg[cols].sort_values("pick_rate", ascending=False).reset_index(drop=True)
 
 
+def loso_winner_margins(
+    df: pd.DataFrame,
+    train_fn: Callable[[pd.DataFrame], tuple],
+    predict_fn: Callable[..., pd.DataFrame],
+    target_col: str = "won_season",
+) -> pd.DataFrame:
+    """Single leave-one-season-out fit per season.
+
+    For each season, fit on all other seasons, score the held-out season, and
+    measure the winner's season-long-favorite margin = the winner's fraction of
+    episodes ranked #1 (over the whole field) minus the best other finalist's.
+    """
+    seasons = sorted(df["season"].unique())
+    by_season = {s: g for s, g in df.groupby("season")}
+    names = df[df[target_col] == 1].groupby("season")["castaway"].first()
+
+    rows = []
+    for s in seasons:
+        model, scaler = train_fn(df[df["season"] != s])
+        preds = predict_fn(model, scaler, by_season[s])
+
+        max_ep = by_season[s]["episode"].max()
+        finalists = list(
+            by_season[s].loc[by_season[s]["episode"] == max_ep, "castaway_id"].unique()
+        )
+        w = by_season[s].loc[by_season[s][target_col] == 1, "castaway_id"].unique()
+        if len(w) == 0:
+            continue
+        winner = w[0]
+
+        # Fraction of episodes each player was the field's #1 pick.
+        p = preds[["episode", "castaway_id", "prob_win"]].copy()
+        p["rk"] = p.groupby("episode")["prob_win"].rank(ascending=False, method="min")
+        frac1 = p.assign(top=(p["rk"] == 1).astype(int)).groupby("castaway_id")["top"].mean()
+        fin = {c: float(frac1.get(c, 0.0)) for c in finalists}
+        wf = fin.get(winner, 0.0)
+        others = [v for c, v in fin.items() if c != winner]
+        best_other = max(others) if others else 0.0
+
+        rank, n_fin = _favorite_among_finalists(preds, finalists, winner)
+        rows.append({
+            "season": s,
+            "winner": names.get(s),
+            "winner_frac1": wf,
+            "best_other_frac1": best_other,
+            "margin": wf - best_other,
+            "loso_rank": rank,
+            "n_finalists": n_fin,
+        })
+
+    return pd.DataFrame(rows).sort_values("margin", ascending=False).reset_index(drop=True)
+
+
 def expanding_window_cv(
     df: pd.DataFrame,
     train_and_evaluate_fn: Callable[[pd.DataFrame, pd.DataFrame], dict],
