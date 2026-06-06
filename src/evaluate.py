@@ -1,4 +1,4 @@
-"""Shared evaluation utilities: temporal cross-validation and feature selection."""
+"""Shared evaluation utilities: cross-validation, bootstrap CIs, feature selection."""
 
 import pandas as pd
 import numpy as np
@@ -13,24 +13,12 @@ def cluster_bootstrap_ci(
     ci: float = 95,
     seed: int = 42,
 ) -> dict:
-    """Cluster bootstrap confidence intervals.
+    """Cluster bootstrap CIs.
 
-    Resamples whole clusters (e.g. seasons) with replacement, recomputing
-    stat_fn on each resample. Resampling at the cluster level — rather than
-    the individual row — preserves within-cluster correlation, so it gives
-    honest CIs for metrics pooled across correlated observations (e.g. the
-    many episodes within a season).
-
-    Args:
-        df: Data with one or more rows per cluster.
-        cluster_col: Column identifying the cluster (e.g. "season").
-        stat_fn: Takes a DataFrame, returns a dict of named scalar metrics.
-        n_boot: Number of bootstrap resamples.
-        ci: Confidence level (percent).
-        seed: RNG seed.
-
-    Returns:
-        Dict mapping each metric name to {"point", "lo", "hi"}.
+    Resamples whole clusters (e.g. seasons) with replacement and recomputes
+    stat_fn each time, preserving within-cluster correlation for honest CIs on
+    pooled metrics. stat_fn: DataFrame -> dict of scalar metrics. Returns
+    {metric: {"point", "lo", "hi"}}.
     """
     rng = np.random.default_rng(seed)
     clusters = df[cluster_col].unique()
@@ -54,6 +42,147 @@ def cluster_bootstrap_ci(
         out[k] = {"point": point[k], "lo": lo, "hi": hi}
 
     return out
+
+
+def _favorite_among_finalists(
+    preds: pd.DataFrame,
+    final_players: list,
+    winner_id,
+) -> tuple[float, int]:
+    """Rank a season's final-episode players by the season-long favorite criterion
+    (most episodes at #1; ties: lower mean rank, then higher finale prob).
+
+    Returns (winner's rank, n_finalists); rank 1 = the model's pick, NaN if the
+    winner isn't among the finalists.
+    """
+    p = preds[["episode", "castaway_id", "prob_win"]].copy()
+    # Rank within each episode (1 = most likely to win that episode).
+    p["rank"] = p.groupby("episode")["prob_win"].rank(ascending=False, method="min")
+    p["is_top"] = (p["rank"] == 1.0).astype(int)
+
+    frac1 = p.groupby("castaway_id")["is_top"].mean()
+    mean_rank = p.groupby("castaway_id")["rank"].mean()
+    max_ep = p["episode"].max()
+    finale_prob = p[p["episode"] == max_ep].groupby("castaway_id")["prob_win"].first()
+
+    candidates = [c for c in final_players if c in frac1.index]
+    # Sort by frac1 desc, then mean_rank asc, then finale_prob desc.
+    candidates.sort(
+        key=lambda c: (-frac1.get(c, 0.0), mean_rank.get(c, np.inf), -finale_prob.get(c, 0.0))
+    )
+
+    n_finalists = len(candidates)
+    if winner_id not in candidates:
+        return float("nan"), n_finalists
+    return float(candidates.index(winner_id) + 1), n_finalists
+
+
+def oob_refit_bootstrap(
+    df: pd.DataFrame,
+    train_fn: Callable[[pd.DataFrame], tuple],
+    predict_fn: Callable[..., pd.DataFrame],
+    feature_cols: list[str],
+    target_col: str = "won_season",
+    n_boot: int = 1000,
+    seed: int = 42,
+    verbose: bool = True,
+) -> dict:
+    """Out-of-bag refit bootstrap for the descriptive winner analysis.
+
+    Each iteration resamples seasons with replacement (in-bag), refits once, and
+    scores the left-out (out-of-bag) seasons. An OOB season is never in its own
+    training set, so each prediction is held-out; future seasons are allowed in
+    training, making this descriptive, not predictive. ~n_boot fits total.
+
+    train_fn: (train_df) -> (model, scaler); model must expose .coef_.
+    predict_fn: (model, scaler, df) -> predictions with a normalized prob_win.
+
+    Returns a dict with:
+      - occurrences: per (OOB season, iteration) the winner's rank among
+        finalists, n_finalists, and whether the winner was the pick (rank 1).
+      - coefficients: standardized coefficient vector per refit.
+      - n_boot, seasons.
+    """
+    rng = np.random.default_rng(seed)
+    seasons = sorted(df["season"].unique())
+    by_season = {s: g.copy() for s, g in df.groupby("season")}
+
+    # Static per-season info: final-episode players and the winner.
+    final_players = {}
+    winners = {}
+    for s, g in by_season.items():
+        max_ep = g["episode"].max()
+        final_players[s] = list(g.loc[g["episode"] == max_ep, "castaway_id"].unique())
+        w = g.loc[g[target_col] == 1, "castaway_id"].unique()
+        winners[s] = w[0] if len(w) else None
+
+    coef_rows = []
+    occ_rows = []
+    step = max(1, n_boot // 10)
+
+    for b in range(n_boot):
+        sampled = rng.choice(seasons, size=len(seasons), replace=True)
+        in_bag = set(sampled.tolist())
+        oob = [s for s in seasons if s not in in_bag]
+
+        train_df = pd.concat([by_season[s] for s in sampled], ignore_index=True)
+        model, scaler = train_fn(train_df)
+        coef_rows.append(np.asarray(model.coef_[0], dtype=float))
+
+        for s in oob:
+            if winners[s] is None:
+                continue
+            preds = predict_fn(model, scaler, by_season[s])
+            rank, n_fin = _favorite_among_finalists(preds, final_players[s], winners[s])
+            occ_rows.append((s, winners[s], rank, n_fin, int(rank == 1.0)))
+
+        if verbose and (b + 1) % step == 0:
+            print(f"  {b + 1}/{n_boot} refits")
+
+    coefficients = pd.DataFrame(coef_rows, columns=list(feature_cols))
+    occurrences = pd.DataFrame(
+        occ_rows,
+        columns=["season", "winner_id", "winner_rank", "n_finalists", "pick_is_winner"],
+    )
+    return {
+        "coefficients": coefficients,
+        "occurrences": occurrences,
+        "n_boot": n_boot,
+        "seasons": seasons,
+    }
+
+
+def summarize_winner_picks(
+    result: dict,
+    df: pd.DataFrame,
+    target_col: str = "won_season",
+) -> pd.DataFrame:
+    """Aggregate `oob_refit_bootstrap` occurrences into a per-winner table, sorted
+    by pick_rate (expected winners first, against-the-odds last).
+
+    Columns: season, winner, pick_rate (fraction of OOB refits the winner was the
+    favorite among finalists), mean_rank, mean_finalists, n_oob (OOB refit count =
+    the pick_rate denominator), winner_id.
+    """
+    occ = result["occurrences"]
+    names = df[df[target_col] == 1].groupby("season")["castaway"].first()
+
+    agg = (
+        occ.groupby(["season", "winner_id"])
+        .agg(
+            n_oob=("pick_is_winner", "size"),
+            pick_rate=("pick_is_winner", "mean"),
+            mean_rank=("winner_rank", "mean"),
+            mean_finalists=("n_finalists", "mean"),
+        )
+        .reset_index()
+    )
+    agg["winner"] = agg["season"].map(names)
+    cols = [
+        "season", "winner", "pick_rate", "mean_rank",
+        "mean_finalists", "n_oob", "winner_id",
+    ]
+    return agg[cols].sort_values("pick_rate", ascending=False).reset_index(drop=True)
 
 
 def expanding_window_cv(
