@@ -44,19 +44,13 @@ def cluster_bootstrap_ci(
     return out
 
 
-def _favorite_among_finalists(
-    preds: pd.DataFrame,
-    final_players: list,
-    winner_id,
-) -> tuple[float, int]:
-    """Rank a season's final-episode players by the season-long favorite criterion
-    (most episodes at #1; ties: lower mean rank, then higher finale prob).
+def _rank_finalists(preds: pd.DataFrame, final_players: list) -> dict:
+    """Rank final-episode players by the season-long favorite criterion.
 
-    Returns (winner's rank, n_finalists); rank 1 = the model's pick, NaN if the
-    winner isn't among the finalists.
+    Returns {castaway_id: rank} with rank 1 = the model's pick (most episodes at
+    #1; ties: lower mean season rank, then higher finale prob).
     """
     p = preds[["episode", "castaway_id", "prob_win"]].copy()
-    # Rank within each episode (1 = most likely to win that episode).
     p["rank"] = p.groupby("episode")["prob_win"].rank(ascending=False, method="min")
     p["is_top"] = (p["rank"] == 1.0).astype(int)
 
@@ -66,15 +60,22 @@ def _favorite_among_finalists(
     finale_prob = p[p["episode"] == max_ep].groupby("castaway_id")["prob_win"].first()
 
     candidates = [c for c in final_players if c in frac1.index]
-    # Sort by frac1 desc, then mean_rank asc, then finale_prob desc.
     candidates.sort(
         key=lambda c: (-frac1.get(c, 0.0), mean_rank.get(c, np.inf), -finale_prob.get(c, 0.0))
     )
+    return {c: i + 1 for i, c in enumerate(candidates)}
 
-    n_finalists = len(candidates)
-    if winner_id not in candidates:
-        return float("nan"), n_finalists
-    return float(candidates.index(winner_id) + 1), n_finalists
+
+def _favorite_among_finalists(
+    preds: pd.DataFrame,
+    final_players: list,
+    winner_id,
+) -> tuple[float, int]:
+    """Return (winner's rank among finalists, n_finalists); NaN rank if not a finalist."""
+    ranks = _rank_finalists(preds, final_players)
+    if winner_id not in ranks:
+        return float("nan"), len(ranks)
+    return float(ranks[winner_id]), len(ranks)
 
 
 def oob_refit_bootstrap(
@@ -185,21 +186,20 @@ def summarize_winner_picks(
     return agg[cols].sort_values("pick_rate", ascending=False).reset_index(drop=True)
 
 
-def loso_winner_margins(
+def loso_finalist_frac1(
     df: pd.DataFrame,
     train_fn: Callable[[pd.DataFrame], tuple],
     predict_fn: Callable[..., pd.DataFrame],
     target_col: str = "won_season",
 ) -> pd.DataFrame:
-    """Single leave-one-season-out fit per season.
+    """Per-finalist season-long #1 share from a single LOSO fit per season.
 
-    For each season, fit on all other seasons, score the held-out season, and
-    measure the winner's season-long-favorite margin = the winner's fraction of
-    episodes ranked #1 (over the whole field) minus the best other finalist's.
+    One row per (season, finalist): season, castaway_id, castaway, is_winner,
+    frac1, prob_win_finale, favorite_rank (among finalists), n_finalists. Base
+    table for winner-margin, dominant-losing-finalist, and calibration views.
     """
     seasons = sorted(df["season"].unique())
     by_season = {s: g for s, g in df.groupby("season")}
-    names = df[df[target_col] == 1].groupby("season")["castaway"].first()
 
     rows = []
     for s in seasons:
@@ -207,35 +207,127 @@ def loso_winner_margins(
         preds = predict_fn(model, scaler, by_season[s])
 
         max_ep = by_season[s]["episode"].max()
-        finalists = list(
-            by_season[s].loc[by_season[s]["episode"] == max_ep, "castaway_id"].unique()
-        )
-        w = by_season[s].loc[by_season[s][target_col] == 1, "castaway_id"].unique()
-        if len(w) == 0:
-            continue
-        winner = w[0]
+        fin = (by_season[s].loc[by_season[s]["episode"] == max_ep,
+                                ["castaway_id", "castaway", target_col]]
+               .drop_duplicates("castaway_id"))
+        finalists = fin["castaway_id"].tolist()
 
-        # Fraction of episodes each player was the field's #1 pick.
         p = preds[["episode", "castaway_id", "prob_win"]].copy()
         p["rk"] = p.groupby("episode")["prob_win"].rank(ascending=False, method="min")
         frac1 = p.assign(top=(p["rk"] == 1).astype(int)).groupby("castaway_id")["top"].mean()
-        fin = {c: float(frac1.get(c, 0.0)) for c in finalists}
-        wf = fin.get(winner, 0.0)
-        others = [v for c, v in fin.items() if c != winner]
-        best_other = max(others) if others else 0.0
+        fav_rank = _rank_finalists(preds, finalists)
+        finale_prob = (
+            preds[preds["episode"] == max_ep]
+            .drop_duplicates("castaway_id")
+            .set_index("castaway_id")["prob_win"]
+        )
 
-        rank, n_fin = _favorite_among_finalists(preds, finalists, winner)
-        rows.append({
-            "season": s,
-            "winner": names.get(s),
-            "winner_frac1": wf,
-            "best_other_frac1": best_other,
-            "margin": wf - best_other,
-            "loso_rank": rank,
-            "n_finalists": n_fin,
-        })
+        for _, r in fin.iterrows():
+            cid = r["castaway_id"]
+            rows.append({
+                "season": s,
+                "castaway_id": cid,
+                "castaway": r["castaway"],
+                "is_winner": int(r[target_col] == 1),
+                "frac1": float(frac1.get(cid, 0.0)),
+                "prob_win_finale": float(finale_prob.get(cid, np.nan)),
+                "favorite_rank": fav_rank.get(cid, np.nan),
+                "n_finalists": len(fin),
+            })
 
-    return pd.DataFrame(rows).sort_values("margin", ascending=False).reset_index(drop=True)
+    return pd.DataFrame(rows)
+
+
+def summarize_winner_margins(finalist_frac1: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate a `loso_finalist_frac1` table into per-winner margins.
+
+    margin = winner's frac1 − best other finalist's frac1. Sorted by margin
+    descending (expected winners first).
+    """
+    winners = finalist_frac1[finalist_frac1["is_winner"] == 1].copy()
+    best_other = (
+        finalist_frac1[finalist_frac1["is_winner"] == 0]
+        .groupby("season")["frac1"]
+        .max()
+        .rename("best_other_frac1")
+    )
+    out = winners.merge(best_other, on="season", how="left")
+    out["best_other_frac1"] = out["best_other_frac1"].fillna(0.0)
+    out = out.rename(columns={"castaway": "winner", "frac1": "winner_frac1"})
+    out["margin"] = out["winner_frac1"] - out["best_other_frac1"]
+    out["loso_rank"] = out["favorite_rank"]
+    cols = [
+        "season", "winner", "winner_frac1", "best_other_frac1",
+        "margin", "loso_rank", "n_finalists",
+    ]
+    return out[cols].sort_values("margin", ascending=False).reset_index(drop=True)
+
+
+def loso_winner_margins(
+    df: pd.DataFrame,
+    train_fn: Callable[[pd.DataFrame], tuple],
+    predict_fn: Callable[..., pd.DataFrame],
+    target_col: str = "won_season",
+    finalist_frac1: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Single LOSO fit per season — winner margin view.
+
+    Convenience wrapper: runs `loso_finalist_frac1` (unless `finalist_frac1` is
+    passed) then `summarize_winner_margins`. Pass a precomputed `finalist_frac1`
+    to avoid refitting when building both winner and loser plots.
+    """
+    if finalist_frac1 is None:
+        finalist_frac1 = loso_finalist_frac1(
+            df, train_fn, predict_fn, target_col=target_col,
+        )
+    return summarize_winner_margins(finalist_frac1)
+
+
+def calibration_bins(
+    df: pd.DataFrame,
+    prob_col: str = "prob_win_finale",
+    outcome_col: str = "is_winner",
+    group_col: str | None = None,
+    bin_edges: list[float] | None = None,
+    min_n: int = 3,
+) -> pd.DataFrame:
+    """Binned calibration table: mean predicted prob vs actual win rate per bin.
+
+    Each row is one bin (optionally per group). Columns include bin_lo, bin_hi,
+    bin_label (e.g. \"15–25%\"), n, mean_predicted (x-axis on the plot), and
+    observed_rate (y-axis). Rows with n < min_n are dropped.
+
+    Default bin_edges: [0, 0.15, 0.25, 0.35, 0.5, 1.0] — fixed probability
+    ranges, same for table and plot.
+    """
+    edges = bin_edges if bin_edges is not None else [0, 0.15, 0.25, 0.35, 0.5, 1.0]
+
+    def _bins(sub: pd.DataFrame, label: str) -> list[dict]:
+        sub = sub.copy()
+        sub["_bin"] = pd.cut(sub[prob_col], bins=edges, include_lowest=True)
+        rows = []
+        for interval, grp in sub.groupby("_bin", observed=True):
+            if len(grp) < min_n:
+                continue
+            lo, hi = interval.left, interval.right
+            rows.append({
+                "group": label,
+                "bin_lo": lo,
+                "bin_hi": hi,
+                "bin_label": f"{lo:.0%}–{hi:.0%}",
+                "n": len(grp),
+                "mean_predicted": grp[prob_col].mean(),
+                "observed_rate": grp[outcome_col].mean(),
+            })
+        return rows
+
+    if group_col is None:
+        out = _bins(df, "All")
+    else:
+        out = []
+        for g, sub in df.groupby(group_col):
+            out.extend(_bins(sub, g))
+    return pd.DataFrame(out)
 
 
 def expanding_window_cv(
