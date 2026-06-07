@@ -186,6 +186,63 @@ def summarize_winner_picks(
     return agg[cols].sort_values("pick_rate", ascending=False).reset_index(drop=True)
 
 
+def summarize_coefficient_stability(
+    result: dict,
+    ci: float = 95,
+    reference_coefs: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Aggregate bootstrap standardized coefficients into a stability table.
+
+    Uses the ``coefficients`` DataFrame from ``oob_refit_bootstrap`` (one row per
+    refit, columns = feature names). Per feature:
+
+    - **median** — central standardized coefficient across refits
+    - **ci_lo / ci_hi** — percentile interval (default 95%)
+    - **sign_stability** — share of refits with the same sign as the median
+    - **rank_stability** — share of refits where |coef| rank is within ±1 of its
+      median rank (1 = most important)
+
+    Optional **reference** column compares to a single-fit coefficient vector
+    (e.g. the deployed model trained on all data). Sorted by |median| descending.
+    """
+    coefs = result["coefficients"]
+    alpha = (100 - ci) / 2
+    abs_ranks = coefs.abs().rank(axis=1, ascending=False, method="min")
+
+    rows = []
+    for feat in coefs.columns:
+        c = coefs[feat]
+        med = float(c.median())
+        lo, hi = np.percentile(c, [alpha, 100 - alpha])
+        sign = int(np.sign(med)) if med != 0 else 0
+        if sign == 0:
+            sign_stab = float((c == 0).mean())
+        else:
+            sign_stab = float((np.sign(c) == sign).mean())
+
+        ranks = abs_ranks[feat]
+        med_rank = float(ranks.median())
+        rank_stab = float((np.abs(ranks - med_rank) <= 1).mean())
+
+        row = {
+            "feature": feat,
+            "median": med,
+            "ci_lo": float(lo),
+            "ci_hi": float(hi),
+            "sign_stability": sign_stab,
+            "rank_stability": rank_stab,
+            "n_refits": len(c),
+        }
+        if reference_coefs is not None and feat in reference_coefs.index:
+            row["reference"] = float(reference_coefs[feat])
+        rows.append(row)
+
+    out = pd.DataFrame(rows)
+    out["abs_median"] = out["median"].abs()
+    out["ci_excludes_zero"] = (out["ci_lo"] > 0) | (out["ci_hi"] < 0)
+    return out.sort_values("abs_median", ascending=False).reset_index(drop=True)
+
+
 def loso_finalist_frac1(
     df: pd.DataFrame,
     train_fn: Callable[[pd.DataFrame], tuple],

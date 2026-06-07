@@ -87,6 +87,7 @@ const FEATURE_LABELS = {
   "votes_against_last_3_eps": "Votes against (last 3 eps)",
   "times_in_danger": "Times in danger",
   "final_n": "Players remaining",
+  "has_advantage": "Has advantage",
   "confessional_share_rolling_3": "Confessional share (rolling 3)",
   "mbti_feeling": "Personality: Feeling",
   "advantages_held": "Advantages held",

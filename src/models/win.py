@@ -39,7 +39,7 @@ FEATURE_COLS = [
     # "is_returnee",
     "num_previous_seasons", #
     # "votes_against_cumulative_by_previous_ep",
-    "votes_against_last_3_eps", #
+    # "votes_against_last_3_eps", #
     # "correct_votes_cumulative_by_previous_ep",
     "times_in_danger", #
     "final_n", #
@@ -49,7 +49,7 @@ FEATURE_COLS = [
     # "tribe_status_Swapped_2",
     # "advantages_held",  
     # "individual_immunity_wins",
-    # "has_advantage",
+    "has_advantage",
     # "confessional_share_last_ep", 
     "confessional_share_rolling_3", #
     # "confessional_share_cumulative",
