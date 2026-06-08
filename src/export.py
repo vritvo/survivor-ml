@@ -3,6 +3,12 @@ App data export: combine the win and elimination models into the per-season JSON
 the web app consumes. The orchestration layer above both model modules — the only
 place that runs them together and knows the app's JSON format.
 
+Each season is scored leave-one-season-out (LOSO). For the latest season this
+matches training on all prior seasons only (temporal); for past seasons the training set
+includes later seasons, which stabilizes early-era trajectories for descriptive
+use in the app. Predictive performance is evaluated separately via expanding-
+window temporal CV in the model modules, not via this export path.
+
 Usage:
     uv run python -m src.export              # export every season
     uv run python -m src.export --season 50  # export a single season
@@ -145,20 +151,22 @@ def _export_season_json(
 # --- Orchestration ---
 
 def season_predictions(df: pd.DataFrame, target_season: int) -> tuple[pd.DataFrame, dict]:
-    """Train both models on all prior seasons and return per-player predictions for
-    `target_season` — win probability plus elimination probability — WITHOUT writing
-    any files.
+    """LOSO: train both models on all seasons except `target_season`, return
+    per-player win and elimination probabilities for the held-out season.
 
-    Returns (preds, fit). `fit` carries trained models/scalers and scored target rows
-    for `_export_season_json`; callers that only need predictions can use
-    `preds, _ = season_predictions(df, s)`.
+    Does not write files. Returns (preds, fit). `fit` carries trained
+    models/scalers and scored target rows for `_export_season_json`.
     """
     df = preprocess(df, _ALL_NEEDED)
-    train = df[df["season"] < target_season]
+    train = df[df["season"] != target_season]
     target = df[df["season"] == target_season]
 
     if target.empty:
         raise ValueError(f"No data found for season {target_season}")
+    if train.empty:
+        raise ValueError(
+            f"Cannot score season {target_season}: no other seasons to train on"
+        )
 
     # Score the target with the elimination model for the app's elimination panel.
     target, elim_model, elim_scaler = add_elim_risk(train, target)
@@ -180,18 +188,17 @@ def season_predictions(df: pd.DataFrame, target_season: int) -> tuple[pd.DataFra
         "elim_model": elim_model,
         "elim_scaler": elim_scaler,
         "n_train": len(train),
+        "n_train_seasons": train["season"].nunique(),
     }
     return preds, fit
 
 
 def export_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
-    """Train both models on all prior seasons, score `target_season`, and write the
-    app JSON. Returns the win predictions.
-    """
+    """LOSO score `target_season` and write the app JSON. Returns win predictions."""
     preds, fit = season_predictions(df, target_season)
 
-    print(f"Training on seasons 1-{target_season - 1} ({fit['n_train']:,} rows), "
-          f"predicting season {target_season} ({len(fit['target']):,} rows)")
+    print(f"LOSO: train on {fit['n_train_seasons']} seasons ({fit['n_train']:,} rows), "
+          f"predict season {target_season} ({len(fit['target']):,} rows)")
 
     _export_season_json(
         preds, fit["target"], target_season,
@@ -201,9 +208,9 @@ def export_season(df: pd.DataFrame, target_season: int) -> pd.DataFrame:
 
 
 def export_all_seasons(df: pd.DataFrame) -> None:
-    """Export the app JSON for every season from 2 to the latest available."""
+    """Export the app JSON for every season from 1 to the latest available."""
     max_season = int(df["season"].max())
-    for season in range(2, max_season + 1):
+    for season in range(1, max_season + 1):
         print(f"\n=== Season {season}/{max_season} ===")
         export_season(df, season)
 

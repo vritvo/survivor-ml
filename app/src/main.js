@@ -116,8 +116,9 @@ async function loadSeason(seasonNumber) {
   currentWinModelInfo = json.win_model_info || json.model_info || null
   currentElimModelInfo = json.elim_model_info || null
 
-  // Build episode dropdown from data
-  const maxEpisode = Math.max(...data.map(player => player.episode.length))
+  // Build episode dropdown from data (use max episode number, not array length —
+  // some seasons skip episode numbers, e.g. season 6 has no episode 10)
+  const maxEpisode = Math.max(...data.flatMap(player => player.episode))
   const episodeSelect = document.getElementById("episode-selector")
   episodeSelect.innerHTML = ""
   for (let i = 1; i <= maxEpisode; i++) {
