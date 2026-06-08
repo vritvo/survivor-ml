@@ -159,8 +159,8 @@ async function loadSeason(seasonNumber) {
     playerSelect.value = defaultPlayer.castaway_id
   }
 
-  renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory')
-  renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory')
+  renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', maxEpisode)
+  renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', maxEpisode)
   renderBar(data, maxEpisode, 'prob_eliminated', 'Elimination probability — Episode ' + maxEpisode, 'elim-by-episode')
   renderBar(data, maxEpisode, 'prob_win', 'Win probability — Episode ' + maxEpisode, 'win-by-episode')
 
@@ -173,18 +173,24 @@ async function loadSeason(seasonNumber) {
   }
 }
 
-function renderTrajectory(data, probCol, title, yLabel, divId) {
+function renderTrajectory(data, probCol, title, yLabel, divId, maxEpisode) {
+  const seasonMaxEp = Math.max(...data.flatMap(player => player.episode))
+  const effectiveMaxEp = maxEpisode ?? seasonMaxEp
+
   const allY = data.flatMap(player => player[probCol])
   const yMin = Math.min(...allY)
   const yMax = Math.max(...allY)
   const yPad = (yMax - yMin) * 0.05
-  const maxEp = Math.max(...data.flatMap(player => player.episode))
+
+  const displayTitle = effectiveMaxEp < seasonMaxEp
+    ? title + ' (through Episode ' + effectiveMaxEp + ')'
+    : title
 
   const mobile = isMobile()
   const layout = {
-    title: { text: title, font: { size: mobile ? 13 : 17 } },
+    title: { text: displayTitle, font: { size: mobile ? 13 : 17 } },
     height: mobile ? 350 : 600,
-    xaxis: { title: { text: "Episode" }, dtick: 1, range: [0.5, maxEp + 0.5], autorange: false },
+    xaxis: { title: { text: "Episode" }, dtick: 1, range: [0.5, seasonMaxEp + 0.5], autorange: false },
     yaxis: { title: { text: yLabel }, tickformat: ".0%", range: [yMin - yPad, yMax + yPad], autorange: false },
     legend: { orientation: 'h', y: mobile ? -0.3 : -0.15, font: { size: mobile ? 9 : 10 } },
     margin: { b: mobile ? 100 : 150, l: mobile ? 50 : 80, r: mobile ? 10 : 80, t: mobile ? 30 : 40 }
@@ -192,18 +198,28 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
 
   const traces = []
   data.forEach(player => {
+    const episodes = []
+    const probs = []
+    for (let i = 0; i < player.episode.length; i++) {
+      if (player.episode[i] > effectiveMaxEp) break
+      episodes.push(player.episode[i])
+      probs.push(player[probCol][i])
+    }
+    if (episodes.length === 0) return
+
     traces.push({
       name: player.castaway,
       legendgroup: player.castaway,
-      x: player.episode,
-      y: player[probCol],
+      x: episodes,
+      y: probs,
       mode: 'lines+markers',
       line: { color: player.won_season === 1 ? 'gold' : undefined, width: player.won_season === 1 ? 3 : 2 },
       marker: { size: player.won_season === 1 ? 8 : 5 }
     })
 
-    player.eliminated_this_episode.forEach((elim, i) => {
-      if (elim === 1) {
+    for (let i = 0; i < player.episode.length; i++) {
+      if (player.episode[i] > effectiveMaxEp) break
+      if (player.eliminated_this_episode[i] === 1) {
         traces.push({
           x: [player.episode[i]],
           y: [player[probCol][i]],
@@ -214,19 +230,22 @@ function renderTrajectory(data, probCol, title, yLabel, divId) {
           hovertemplate: player.castaway + '<extra>Eliminated</extra>'
         })
       }
-    })
+    }
 
     if (player.won_season === 1) {
-      const lastIdx = player.episode.length - 1
-      traces.push({
-        x: [player.episode[lastIdx]],
-        y: [player[probCol][lastIdx]],
-        mode: 'markers',
-        marker: { symbol: 'star', size: 16, color: 'gold', line: { color: 'black', width: 1 } },
-        legendgroup: player.castaway,
-        showlegend: false,
-        hovertemplate: player.castaway + ' - Winner<extra></extra>'
-      })
+      const finaleEp = player.episode[player.episode.length - 1]
+      if (finaleEp <= effectiveMaxEp) {
+        const lastIdx = player.episode.length - 1
+        traces.push({
+          x: [player.episode[lastIdx]],
+          y: [player[probCol][lastIdx]],
+          mode: 'markers',
+          marker: { symbol: 'star', size: 16, color: 'gold', line: { color: 'black', width: 1 } },
+          legendgroup: player.castaway,
+          showlegend: false,
+          hovertemplate: player.castaway + ' - Winner<extra></extra>'
+        })
+      }
     }
   })
 
@@ -622,6 +641,8 @@ seasonButton.addEventListener("change", function() {
 var episodeButton = document.getElementById("episode-selector")
 episodeButton.addEventListener("change", function() {
   const episode = Number(episodeButton.value)
+  renderTrajectory(currentData, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', episode)
+  renderTrajectory(currentData, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', episode)
   renderBar(currentData, episode, 'prob_eliminated', 'Elimination probability — Episode ' + episode, 'elim-by-episode')
   renderBar(currentData, episode, 'prob_win', 'Win probability — Episode ' + episode, 'win-by-episode')
 
