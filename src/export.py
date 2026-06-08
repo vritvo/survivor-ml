@@ -149,9 +149,9 @@ def season_predictions(df: pd.DataFrame, target_season: int) -> tuple[pd.DataFra
     `target_season` — win probability plus elimination probability — WITHOUT writing
     any files.
 
-    Returns (preds, fit), where `fit` carries the trained models/scalers and the
-    scored target rows that `_export_season_json` needs. For analysis (e.g. the
-    notebook) you can ignore `fit`: `preds, _ = season_predictions(df, s)`.
+    Returns (preds, fit). `fit` carries trained models/scalers and scored target rows
+    for `_export_season_json`; callers that only need predictions can use
+    `preds, _ = season_predictions(df, s)`.
     """
     df = preprocess(df, _ALL_NEEDED)
     train = df[df["season"] < target_season]

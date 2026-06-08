@@ -2,7 +2,163 @@
 
 import pandas as pd
 import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from typing import Callable
+
+# Columns in build_modeling_table() that are not model inputs.
+MODELING_TABLE_META_COLS = frozenset({
+    "season",
+    "episode",
+    "castaway_id",
+    "castaway",
+    "tribe",
+    "order",
+    "eliminated_this_episode",
+    "won_season",
+    "num_votes_received",
+    "votes_against_cumulative",
+})
+
+# Last-episode univariate snapshots where the feature mostly encodes "survived to
+# finale" or endgame composition, not a substantive win signal on its own.
+UNIVARIATE_MECHANICAL_EXCLUDE = frozenset({
+    "final_n",
+    "age_rank",
+    "tribe_status_Merged",
+    "tribe_status_Original",
+    "tribe_status_Swapped",
+    "tribe_status_Swapped_2",
+})
+
+# Tribe dummies only — still excluded for all-episode runs (structural, rarely interpretable).
+UNIVARIATE_TRIBE_EXCLUDE = frozenset({
+    "tribe_status_Merged",
+    "tribe_status_Original",
+    "tribe_status_Swapped",
+    "tribe_status_Swapped_2",
+})
+
+
+def modeling_feature_cols(
+    df: pd.DataFrame,
+    exclude: set[str] | frozenset | None = None,
+) -> list[str]:
+    """Feature columns present in a modeling table (excludes IDs, targets, helpers)."""
+    skip = MODELING_TABLE_META_COLS | set(exclude or [])
+    return [
+        c for c in df.columns
+        if c not in skip and pd.api.types.is_numeric_dtype(df[c])
+    ]
+
+
+def player_season_snapshot(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (season, player): their last in-game episode."""
+    ordered = df.sort_values(["season", "castaway_id", "episode"])
+    return ordered.groupby(["season", "castaway_id"], as_index=False).last()
+
+
+def _univariate_logistic_coefs(
+    sub: pd.DataFrame,
+    features: list[str],
+    target_col: str = "won_season",
+) -> dict[str, float]:
+    """Standardized univariate logistic coefficients (one feature at a time)."""
+    out: dict[str, float] = {}
+    for feat in features:
+        valid = sub[[feat, target_col]].dropna()
+        if len(valid) < 20 or valid[feat].std() == 0 or valid[target_col].nunique() < 2:
+            out[feat] = float("nan")
+            continue
+        X = StandardScaler().fit_transform(valid[[feat]])
+        y = valid[target_col].values
+        try:
+            model = LogisticRegression(
+                class_weight="balanced",
+                solver="lbfgs",
+                max_iter=2000,
+                C=1.0,
+            )
+            model.fit(X, y)
+            out[feat] = float(model.coef_[0][0])
+        except (ValueError, np.linalg.LinAlgError):
+            out[feat] = float("nan")
+    return out
+
+
+def summarize_univariate_win_associations(
+    df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    target_col: str = "won_season",
+    cluster_col: str = "season",
+    unit: str = "all_episodes",
+    exclude_mechanical: bool = True,
+    n_boot: int = 2000,
+    ci: float = 95,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Marginal feature ↔ winning associations with season-cluster bootstrap CIs.
+
+    Each feature gets its own standardized univariate logistic regression
+    (positive coef → higher feature values associated with winning). CIs resample
+    whole seasons.
+
+    **unit** (default ``"all_episodes"``):
+        - ``"all_episodes"`` — every player-episode row while in game (same rows
+          as the win model trains on). Aligns with CV / forward selection.
+        - ``"last_episode"`` — one row per player at their last in-game episode.
+          Cumulative features at exit conflate survival length with the signal.
+
+    By default excludes tribe-status dummies; ``last_episode`` also drops
+    ``final_n`` and ``age_rank``.
+    """
+    if unit == "last_episode":
+        analysis_df = player_season_snapshot(df)
+        extra = UNIVARIATE_MECHANICAL_EXCLUDE if exclude_mechanical else frozenset()
+    elif unit == "all_episodes":
+        analysis_df = df
+        extra = UNIVARIATE_TRIBE_EXCLUDE if exclude_mechanical else frozenset()
+    else:
+        raise ValueError(f"unit must be 'all_episodes' or 'last_episode', got {unit!r}")
+
+    if feature_cols is None:
+        features = modeling_feature_cols(df, exclude=extra)
+    else:
+        features = list(feature_cols)
+
+    def stat_fn(sub: pd.DataFrame) -> dict[str, float]:
+        return _univariate_logistic_coefs(sub, features, target_col=target_col)
+
+    point = stat_fn(analysis_df)
+    boot = cluster_bootstrap_ci(
+        analysis_df,
+        cluster_col,
+        stat_fn,
+        n_boot=n_boot,
+        ci=ci,
+        seed=seed,
+    )
+
+    n_winner_ps = (
+        analysis_df.groupby(["season", "castaway_id"])[target_col].max().sum()
+    )
+    rows = []
+    for feat in features:
+        p = point[feat]
+        b = boot[feat]
+        rows.append({
+            "feature": feat,
+            "coef": float(p) if not np.isnan(p) else float("nan"),
+            "ci_lo": b["lo"],
+            "ci_hi": b["hi"],
+            "ci_excludes_zero": (b["lo"] > 0) or (b["hi"] < 0),
+            "n_rows": int(analysis_df[feat].notna().sum()),
+            "n_winner_player_seasons": int(n_winner_ps),
+            "unit": unit,
+        })
+    out = pd.DataFrame(rows)
+    out["abs_coef"] = out["coef"].abs()
+    return out.sort_values("abs_coef", ascending=False, na_position="last").reset_index(drop=True)
 
 
 def cluster_bootstrap_ci(
