@@ -121,11 +121,129 @@ function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT }
 // Cumulative #1 share is noisy for the first few episodes (one good week = 100%).
 const CUMULATIVE_RANK_MIN_EPISODE = 6
 
+const WINNER_COLOR = 'gold'
+const ACCENT_COLOR = '#c8873a'
+const SELECTED_BAR_COLOR = '#8b5a2b'
+const BACKGROUND_OPACITY = 0.72
+
+// Plotly default qualitative palette — assigned by player name, not trace order.
+const TRACE_PALETTE = [
+  '#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+  '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52',
+  '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+]
+
+let currentPlayerColorMap = {}
+
+function buildPlayerColorMap(data) {
+  const sorted = [...data].sort((a, b) => a.castaway.localeCompare(b.castaway))
+  const map = {}
+  sorted.forEach((p, i) => {
+    map[p.castaway_id] = TRACE_PALETTE[i % TRACE_PALETTE.length]
+  })
+  return map
+}
+
+/** Background players first (alpha), then winner, then selected — both on top. */
+function orderPlayersForDraw(data, selectedId) {
+  const winner = data.find(p => p.won_season === 1)
+  const winnerId = winner?.castaway_id
+
+  const background = data.filter(p => {
+    if (p.won_season === 1) return false
+    if (selectedId && p.castaway_id === selectedId) return false
+    return true
+  })
+
+  const foreground = []
+  if (winner && winnerId !== selectedId) foreground.push(winner)
+  if (selectedId) {
+    const selected = data.find(p => p.castaway_id === selectedId)
+    if (selected) foreground.push(selected)
+  } else if (winner) {
+    foreground.push(winner)
+  }
+
+  return [
+    ...background.sort((a, b) => a.castaway.localeCompare(b.castaway)),
+    ...foreground,
+  ]
+}
+
+function orderContendersForDraw(contenders, selectedId) {
+  const winner = contenders.find(s => s.won_season === 1)
+  const winnerId = winner?.castaway_id
+
+  const background = contenders.filter(s => {
+    if (s.won_season === 1) return false
+    if (selectedId && s.castaway_id === selectedId) return false
+    return true
+  })
+
+  const foreground = []
+  if (winner && winnerId !== selectedId) foreground.push(winner)
+  if (selectedId) {
+    const selected = contenders.find(s => s.castaway_id === selectedId)
+    if (selected) foreground.push(selected)
+  } else if (winner) {
+    foreground.push(winner)
+  }
+
+  return [
+    ...background.sort((a, b) => a.castaway.localeCompare(b.castaway)),
+    ...foreground,
+  ]
+}
+
+function getSelectedPlayerId() {
+  return document.getElementById('player-selector').value || null
+}
+
+function trajectoryTraceStyle(player, selectedId, colorMap) {
+  const isWinner = player.won_season === 1
+  const isSelected = selectedId && player.castaway_id === selectedId
+  const isHighlighted = isWinner || isSelected
+
+  let lineColor = colorMap[player.castaway_id]
+  let lineWidth = 2
+  let markerSize = 5
+  let opacity = isHighlighted ? 1 : BACKGROUND_OPACITY
+
+  if (isWinner) {
+    lineColor = WINNER_COLOR
+    lineWidth = 4
+    markerSize = 9
+  }
+  if (isSelected && !isWinner) {
+    lineColor = ACCENT_COLOR
+    lineWidth = 5
+    markerSize = 10
+  }
+  if (isSelected && isWinner) {
+    lineWidth = 5
+    markerSize = 11
+  }
+
+  const line = { width: lineWidth, color: lineColor }
+  return { line, markerSize, opacity }
+}
+
+function refreshOverviewCharts(episode) {
+  if (!currentData) return
+  renderTrajectory(currentData, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', episode)
+  renderTrajectory(currentData, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', episode)
+  renderCumulativeRank1(currentData, episode)
+  renderBar(currentData, episode, 'prob_eliminated', 'Elimination probability — Episode ' + episode, 'elim-by-episode')
+  renderBar(currentData, episode, 'prob_win', 'Win probability — Episode ' + episode, 'win-by-episode')
+}
+
 async function loadSeason(seasonNumber) {
   const response = await fetch('data/seasons/season_' + seasonNumber + '.json')
   const json = await response.json()
   const data = json.players || json
   currentData = data
+  currentPlayerColorMap = buildPlayerColorMap(data)
   currentWinModelInfo = json.win_model_info || json.model_info || null
   currentElimModelInfo = json.elim_model_info || null
 
@@ -173,11 +291,7 @@ async function loadSeason(seasonNumber) {
     playerSelect.value = defaultPlayer.castaway_id
   }
 
-  renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', maxEpisode)
-  renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', maxEpisode)
-  renderCumulativeRank1(data, maxEpisode)
-  renderBar(data, maxEpisode, 'prob_eliminated', 'Elimination probability — Episode ' + maxEpisode, 'elim-by-episode')
-  renderBar(data, maxEpisode, 'prob_win', 'Win probability — Episode ' + maxEpisode, 'win-by-episode')
+  refreshOverviewCharts(maxEpisode)
 
   if (defaultPlayer) {
     renderPlayerDetail(data, defaultPlayer.castaway_id, maxEpisode)
@@ -191,6 +305,7 @@ async function loadSeason(seasonNumber) {
 function renderTrajectory(data, probCol, title, yLabel, divId, maxEpisode) {
   const seasonMaxEp = Math.max(...data.flatMap(player => player.episode))
   const effectiveMaxEp = maxEpisode ?? seasonMaxEp
+  const selectedId = getSelectedPlayerId()
 
   const allY = data.flatMap(player => player[probCol])
   const yMin = Math.min(...allY)
@@ -212,7 +327,7 @@ function renderTrajectory(data, probCol, title, yLabel, divId, maxEpisode) {
   }
 
   const traces = []
-  data.forEach(player => {
+  orderPlayersForDraw(data, selectedId).forEach(player => {
     const episodes = []
     const probs = []
     for (let i = 0; i < player.episode.length; i++) {
@@ -222,14 +337,16 @@ function renderTrajectory(data, probCol, title, yLabel, divId, maxEpisode) {
     }
     if (episodes.length === 0) return
 
+    const style = trajectoryTraceStyle(player, selectedId, currentPlayerColorMap)
     traces.push({
       name: player.castaway,
       legendgroup: player.castaway,
       x: episodes,
       y: probs,
       mode: 'lines+markers',
-      line: { color: player.won_season === 1 ? 'gold' : undefined, width: player.won_season === 1 ? 3 : 2 },
-      marker: { size: player.won_season === 1 ? 8 : 5 }
+      opacity: style.opacity,
+      line: style.line,
+      marker: { size: style.markerSize, opacity: style.opacity },
     })
 
     for (let i = 0; i < player.episode.length; i++) {
@@ -355,6 +472,7 @@ function getSeasonLongPick(stats) {
 function renderCumulativeRank1(data, maxEpisode) {
   const stats = computeCumulativeRankStats(data, maxEpisode)
   const { playerStats, seasonMaxEp, effectiveMaxEp } = stats
+  const selectedId = getSelectedPlayerId()
   const rowEl = document.querySelector('.chart-row-win-extra')
 
   if (effectiveMaxEp < CUMULATIVE_RANK_MIN_EPISODE) {
@@ -378,7 +496,7 @@ function renderCumulativeRank1(data, maxEpisode) {
   }
 
   const contenders = Object.values(playerStats).filter(
-    s => s.everRank1 || s.won_season === 1
+    s => s.everRank1 || s.won_season === 1 || (selectedId && s.castaway_id === selectedId)
   )
 
   const displayTitle = effectiveMaxEp < seasonMaxEp
@@ -396,21 +514,23 @@ function renderCumulativeRank1(data, maxEpisode) {
   }
 
   const traces = []
-  contenders.forEach(s => {
+  orderContendersForDraw(contenders, selectedId).forEach(s => {
     if (s.episodes.length === 0) return
 
-    const isWinner = s.won_season === 1
+    const player = { castaway_id: s.castaway_id, won_season: s.won_season }
+    const style = trajectoryTraceStyle(player, selectedId, currentPlayerColorMap)
     traces.push({
       name: s.castaway,
       legendgroup: s.castaway,
       x: s.episodes,
       y: s.fracRank1,
       mode: 'lines+markers',
-      line: { color: isWinner ? 'gold' : undefined, width: isWinner ? 3 : 2 },
-      marker: { size: isWinner ? 8 : 5 },
+      opacity: style.opacity,
+      line: style.line,
+      marker: { size: style.markerSize, opacity: style.opacity },
     })
 
-    if (isWinner) {
+    if (s.won_season === 1) {
       const finaleEp = s.episodes[s.episodes.length - 1]
       if (finaleEp <= effectiveMaxEp) {
         const lastIdx = s.episodes.length - 1
@@ -435,7 +555,9 @@ function getEpisodeData(data, episode) {
     const idx = player.episode.indexOf(episode)
     if (idx === -1) return null
     return {
+      castaway_id: player.castaway_id,
       castaway: player.castaway,
+      won_season: player.won_season,
       prob_win: player.prob_win[idx],
       prob_eliminated: player.prob_eliminated[idx]
     }
@@ -443,7 +565,19 @@ function getEpisodeData(data, episode) {
   return epData
 }
 
+function barColorForPlayer(row, selectedId) {
+  const isSelected = selectedId && row.castaway_id === selectedId
+  const isWinner = row.won_season === 1
+  const isHighlighted = isSelected || isWinner
+  if (isSelected && isWinner) return WINNER_COLOR
+  if (isSelected) return SELECTED_BAR_COLOR
+  if (isWinner) return WINNER_COLOR
+  if (selectedId && !isHighlighted) return 'rgba(200, 135, 58, ' + BACKGROUND_OPACITY + ')'
+  return ACCENT_COLOR
+}
+
 function renderBar(data, episode, probCol, title, divId) {
+  const selectedId = getSelectedPlayerId()
   const mobile = isMobile()
   const layout = {
     title: { text: title, font: { size: mobile ? 13 : 17 } },
@@ -461,7 +595,7 @@ function renderBar(data, episode, probCol, title, divId) {
     y: sorted.map(d => d.castaway),
     type: 'bar',
     orientation: 'h',
-    marker: { color: '#c8873a' }
+    marker: { color: sorted.map(d => barColorForPlayer(d, selectedId)) }
   }]
 
   Plotly.newPlot(divId, trace, layout, { responsive: true })
@@ -761,6 +895,41 @@ function renderContributionTimeline(data, player, modelInfo, featuresKey, title,
   Plotly.newPlot(divId, traces, layout, { responsive: true })
 }
 
+function renderDetailPlaceholder(divId, chartTitle, message) {
+  const mobile = isMobile()
+  Plotly.newPlot(divId, [], {
+    title: { text: chartTitle, font: { size: mobile ? 12 : 17 } },
+    height: mobile ? 300 : 350,
+    paper_bgcolor: '#faf9f7',
+    plot_bgcolor: '#f5f3f0',
+    xaxis: { visible: false, fixedrange: true },
+    yaxis: { visible: false, fixedrange: true },
+    annotations: [{
+      text: message,
+      xref: 'paper',
+      yref: 'paper',
+      x: 0.5,
+      y: 0.5,
+      showarrow: false,
+      font: { size: mobile ? 13 : 15, color: '#5c5349' },
+      align: 'center',
+    }],
+    shapes: [{
+      type: 'rect',
+      xref: 'paper',
+      yref: 'paper',
+      x0: 0.03,
+      y0: 0.03,
+      x1: 0.97,
+      y1: 0.97,
+      line: { color: '#c8873a', width: 1.5, dash: 'dot' },
+      fillcolor: 'rgba(255, 255, 255, 0.85)',
+      layer: 'below',
+    }],
+    margin: { l: 28, r: 28, t: mobile ? 36 : 44, b: 28 },
+  }, { responsive: true, displayModeBar: false })
+}
+
 function renderPlayerDetail(data, castawayId, episode) {
   const player = data.find(p => p.castaway_id === castawayId)
   if (!player) return
@@ -774,17 +943,20 @@ function renderPlayerDetail(data, castawayId, episode) {
   renderContributionTimeline(data, player, currentWinModelInfo, 'win_features', 'Win contributions — ' + player.castaway, 'win-timeline', true)
 
   const epIdx = player.episode.indexOf(episode)
+  const descEl = document.getElementById("view-description")
   if (epIdx === -1) {
-    const lastEp = player.episode[player.episode.length - 1]
-    document.getElementById("view-description").textContent =
-      player.castaway + ' was eliminated in Episode ' + lastEp +
-      ', but Episode ' + episode + ' is selected. Choose Episode ' + lastEp + ' or earlier to see their breakdown.'
-    Plotly.purge('elim-detail')
-    Plotly.purge('win-detail')
+    const lastEp = Math.max(...player.episode)
+    const placeholderMsg =
+      player.castaway + ' was eliminated in Episode ' + lastEp + ',<br>' +
+      'but Episode ' + episode + ' is selected.<br><br>' +
+      'Choose Episode ' + lastEp + ' or earlier to see their breakdown.'
+    descEl.style.display = 'none'
+    renderDetailPlaceholder('elim-detail', 'Elimination — ' + player.castaway, placeholderMsg)
+    renderDetailPlaceholder('win-detail', 'Win — ' + player.castaway, placeholderMsg)
     return
   }
 
-  const descEl = document.getElementById("view-description")
+  descEl.style.display = ''
   if (currentView === 'bullet') {
     descEl.textContent = VIEW_DESCRIPTIONS.bullet
   } else {
@@ -819,11 +991,7 @@ seasonButton.addEventListener("change", function() {
 var episodeButton = document.getElementById("episode-selector")
 episodeButton.addEventListener("change", function() {
   const episode = Number(episodeButton.value)
-  renderTrajectory(currentData, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', episode)
-  renderTrajectory(currentData, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', episode)
-  renderCumulativeRank1(currentData, episode)
-  renderBar(currentData, episode, 'prob_eliminated', 'Elimination probability — Episode ' + episode, 'elim-by-episode')
-  renderBar(currentData, episode, 'prob_win', 'Win probability — Episode ' + episode, 'win-by-episode')
+  refreshOverviewCharts(episode)
 
   const playerId = document.getElementById("player-selector").value
   if (playerId && currentData) {
@@ -834,12 +1002,16 @@ episodeButton.addEventListener("change", function() {
 var playerButton = document.getElementById("player-selector")
 playerButton.addEventListener("change", function() {
   const playerId = playerButton.value
+  const episode = Number(document.getElementById("episode-selector").value)
+
   if (!playerId) {
     document.getElementById("player-empty-state").style.display = "block"
     document.getElementById("player-charts").style.display = "none"
+    refreshOverviewCharts(episode)
     return
   }
-  const episode = Number(document.getElementById("episode-selector").value)
+
+  refreshOverviewCharts(episode)
   renderPlayerDetail(currentData, playerId, episode)
 })
 
