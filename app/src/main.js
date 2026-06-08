@@ -34,6 +34,16 @@ document.querySelector('#app').innerHTML = `
       <div id="elim-trajectory" class="chart" data-model="elim"></div>
       <div id="win-trajectory" class="chart" data-model="win"></div>
     </div>
+    <div class="chart-row chart-row-win-extra">
+      <div class="win-contender-aside">
+        <p class="contender-aside-label">Why this chart?</p>
+        <p class="contender-aside-text">Per-episode P(win) swings a lot. This tracks who the model has ranked #1 most often over the season. It's a smoother read on likely contenders.</p>
+      </div>
+      <div class="win-extra-column" data-model="win">
+        <p id="win-season-pick" class="season-pick-callout"></p>
+        <div id="win-cumulative-rank1" class="chart"></div>
+      </div>
+    </div>
   </section>
   <section class="dashboard-section">
     <h2 class="section-title">Episode Snapshot</h2>
@@ -108,6 +118,9 @@ let currentView = 'bullet'
 const MOBILE_BREAKPOINT = 768
 function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT }
 
+// Cumulative #1 share is noisy for the first few episodes (one good week = 100%).
+const CUMULATIVE_RANK_MIN_EPISODE = 6
+
 async function loadSeason(seasonNumber) {
   const response = await fetch('data/seasons/season_' + seasonNumber + '.json')
   const json = await response.json()
@@ -162,6 +175,7 @@ async function loadSeason(seasonNumber) {
 
   renderTrajectory(data, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', maxEpisode)
   renderTrajectory(data, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', maxEpisode)
+  renderCumulativeRank1(data, maxEpisode)
   renderBar(data, maxEpisode, 'prob_eliminated', 'Elimination probability — Episode ' + maxEpisode, 'elim-by-episode')
   renderBar(data, maxEpisode, 'prob_win', 'Win probability — Episode ' + maxEpisode, 'win-by-episode')
 
@@ -251,6 +265,169 @@ function renderTrajectory(data, probCol, title, yLabel, divId, maxEpisode) {
   })
 
   Plotly.newPlot(divId, traces, layout, { responsive: true })
+}
+
+// --- Cumulative #1 rank (win model readout) ---
+
+function rankPlayersAtEpisode(playersAtEp) {
+  const sorted = [...playersAtEp].sort((a, b) => {
+    if (b.prob_win !== a.prob_win) return b.prob_win - a.prob_win
+    return a.castaway_id.localeCompare(b.castaway_id)
+  })
+  const ranks = new Map()
+  sorted.forEach((row, i) => ranks.set(row.castaway_id, i + 1))
+  return ranks
+}
+
+function computeCumulativeRankStats(data, maxEpisode) {
+  const seasonMaxEp = Math.max(...data.flatMap(player => player.episode))
+  const effectiveMaxEp = maxEpisode ?? seasonMaxEp
+
+  const episodeNumbers = [...new Set(data.flatMap(p => p.episode))]
+    .filter(ep => ep <= effectiveMaxEp)
+    .sort((a, b) => a - b)
+
+  const playerStats = {}
+  data.forEach(p => {
+    playerStats[p.castaway_id] = {
+      castaway: p.castaway,
+      castaway_id: p.castaway_id,
+      won_season: p.won_season,
+      episodes: [],
+      fracRank1: [],
+      cumRank1: 0,
+      epCount: 0,
+      everRank1: false,
+    }
+  })
+
+  episodeNumbers.forEach(ep => {
+    const atEp = data
+      .map(p => {
+        const idx = p.episode.indexOf(ep)
+        if (idx === -1) return null
+        return {
+          castaway_id: p.castaway_id,
+          castaway: p.castaway,
+          prob_win: p.prob_win[idx],
+        }
+      })
+      .filter(row => row !== null)
+
+    const ranks = rankPlayersAtEpisode(atEp)
+    atEp.forEach(row => {
+      const stats = playerStats[row.castaway_id]
+      stats.epCount += 1
+      if (ranks.get(row.castaway_id) === 1) {
+        stats.cumRank1 += 1
+        stats.everRank1 = true
+      }
+      stats.episodes.push(ep)
+      stats.fracRank1.push(stats.cumRank1 / stats.epCount)
+    })
+  })
+
+  return { playerStats, seasonMaxEp, effectiveMaxEp }
+}
+
+function getSeasonLongPick(stats) {
+  const { playerStats, effectiveMaxEp } = stats
+  let best = null
+
+  Object.values(playerStats).forEach(s => {
+    const epIdx = s.episodes.indexOf(effectiveMaxEp)
+    if (epIdx === -1) return
+    const frac = s.fracRank1[epIdx]
+    if (best === null || frac > best.frac ||
+        (frac === best.frac && s.cumRank1 > best.cumRank1)) {
+      best = {
+        castaway: s.castaway,
+        frac,
+        cumRank1: s.cumRank1,
+        epCount: s.epCount,
+      }
+    }
+  })
+
+  return best
+}
+
+function renderCumulativeRank1(data, maxEpisode) {
+  const stats = computeCumulativeRankStats(data, maxEpisode)
+  const { playerStats, seasonMaxEp, effectiveMaxEp } = stats
+  const rowEl = document.querySelector('.chart-row-win-extra')
+
+  if (effectiveMaxEp < CUMULATIVE_RANK_MIN_EPISODE) {
+    rowEl.style.display = 'none'
+    Plotly.purge('win-cumulative-rank1')
+    return
+  }
+  rowEl.style.display = ''
+
+  const pickEl = document.getElementById('win-season-pick')
+  const pick = getSeasonLongPick(stats)
+  if (pick && pick.cumRank1 > 0) {
+    const throughLabel = effectiveMaxEp < seasonMaxEp
+      ? ' (through Episode ' + effectiveMaxEp + ')'
+      : ''
+    pickEl.innerHTML = '<strong>Model\u2019s season pick' + throughLabel + ':</strong> ' +
+      pick.castaway + ' \u2014 ranked #1 in ' + pick.cumRank1 + ' of ' + pick.epCount + ' episodes'
+    pickEl.style.display = 'block'
+  } else {
+    pickEl.style.display = 'none'
+  }
+
+  const contenders = Object.values(playerStats).filter(
+    s => s.everRank1 || s.won_season === 1
+  )
+
+  const displayTitle = effectiveMaxEp < seasonMaxEp
+    ? 'Fraction of episodes ranked #1 (through Episode ' + effectiveMaxEp + ')'
+    : 'Fraction of episodes ranked #1 (cumulative)'
+
+  const mobile = isMobile()
+  const layout = {
+    title: { text: displayTitle, font: { size: mobile ? 13 : 17 } },
+    height: mobile ? 320 : 450,
+    xaxis: { title: { text: 'Episode' }, dtick: 1, range: [0.5, seasonMaxEp + 0.5], autorange: false },
+    yaxis: { title: { text: 'Frac. ranked #1' }, tickformat: '.0%', range: [0, 1.05], autorange: false },
+    legend: { orientation: 'h', y: mobile ? -0.35 : -0.2, font: { size: mobile ? 9 : 10 } },
+    margin: { b: mobile ? 100 : 130, l: mobile ? 50 : 80, r: mobile ? 10 : 80, t: mobile ? 30 : 40 },
+  }
+
+  const traces = []
+  contenders.forEach(s => {
+    if (s.episodes.length === 0) return
+
+    const isWinner = s.won_season === 1
+    traces.push({
+      name: s.castaway,
+      legendgroup: s.castaway,
+      x: s.episodes,
+      y: s.fracRank1,
+      mode: 'lines+markers',
+      line: { color: isWinner ? 'gold' : undefined, width: isWinner ? 3 : 2 },
+      marker: { size: isWinner ? 8 : 5 },
+    })
+
+    if (isWinner) {
+      const finaleEp = s.episodes[s.episodes.length - 1]
+      if (finaleEp <= effectiveMaxEp) {
+        const lastIdx = s.episodes.length - 1
+        traces.push({
+          x: [s.episodes[lastIdx]],
+          y: [s.fracRank1[lastIdx]],
+          mode: 'markers',
+          marker: { symbol: 'star', size: 16, color: 'gold', line: { color: 'black', width: 1 } },
+          legendgroup: s.castaway,
+          showlegend: false,
+          hovertemplate: s.castaway + ' - Winner<extra></extra>',
+        })
+      }
+    }
+  })
+
+  Plotly.newPlot('win-cumulative-rank1', traces, layout, { responsive: true })
 }
 
 function getEpisodeData(data, episode) {
@@ -644,6 +821,7 @@ episodeButton.addEventListener("change", function() {
   const episode = Number(episodeButton.value)
   renderTrajectory(currentData, 'prob_eliminated', 'Elimination probability by episode', 'P(elimination)', 'elim-trajectory', episode)
   renderTrajectory(currentData, 'prob_win', 'Win probability by episode', 'P(win)', 'win-trajectory', episode)
+  renderCumulativeRank1(currentData, episode)
   renderBar(currentData, episode, 'prob_eliminated', 'Elimination probability — Episode ' + episode, 'elim-by-episode')
   renderBar(currentData, episode, 'prob_win', 'Win probability — Episode ' + episode, 'win-by-episode')
 

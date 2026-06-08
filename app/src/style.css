@@ -228,7 +228,8 @@ code {
   }
 
   .content.show-win .chart[data-model="elim"],
-  .content.show-elim .chart[data-model="win"] {
+  .content.show-elim .chart[data-model="win"],
+  .content.show-elim .win-extra-column[data-model="win"] {
     position: absolute;
     width: 100%;
     visibility: hidden;
@@ -438,6 +439,78 @@ code {
 .chart-row {
   display: flex;
   flex-direction: row;
+}
+
+.win-contender-aside {
+  flex: 1;
+  margin: 10px 4px 10px 10px;
+  padding: 20px 8px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  text-align: right;
+  gap: 8px;
+}
+
+.contender-aside-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-h);
+  margin: 0;
+  max-width: 22rem;
+}
+
+.contender-aside-text {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  margin: 0;
+  max-width: 22rem;
+}
+
+.win-extra-column {
+  flex: 1;
+  margin: 0 10px 10px 4px;
+  min-width: 0;
+}
+
+.season-pick-callout {
+  font-size: 14px;
+  color: var(--text-h);
+  margin: 0 0 4px;
+  padding: 0 2px;
+}
+
+@media (max-width: 768px) {
+  .chart-row-win-extra {
+    flex-direction: column;
+  }
+
+  .win-contender-aside {
+    margin: 10px 10px 0;
+    padding: 0 2px 4px;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .contender-aside-label,
+  .contender-aside-text {
+    max-width: none;
+  }
+
+  .content.show-elim .chart-row-win-extra {
+    display: none !important;
+  }
+
+  .win-extra-column {
+    margin: 10px;
+    width: 100%;
+  }
+}
+
+.win-extra-column .chart {
+  margin: 0;
 }
 
 .chart {
