@@ -12,7 +12,8 @@ on:
     - cron: '0 15 * * 2'  # Tuesday
 
 permissions:
-  contents: write 
+  contents: write  # commit updated JSON
+  actions: write   # trigger deploy workflow after a data commit
 
 jobs:
   refresh:
@@ -36,6 +37,7 @@ jobs:
         run: uv run python main.py --fetch-data
 
       - name: Commit and push if season data changed
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -44,7 +46,23 @@ jobs:
 
           if git diff --staged --quiet; then
             echo "No changes to season JSON — skipping commit."
+            echo "committed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: refresh season data"
             git push
+            echo "committed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # Pushes from GITHUB_TOKEN do not trigger other workflows (e.g. deploy.yml on push).
+      # Manually dispatch deploy when we actually committed new data.
+      - name: Trigger site deploy
+        if: steps.commit.outputs.committed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy.yml',
+              ref: 'main',
+            })
