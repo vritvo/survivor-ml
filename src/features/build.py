@@ -222,6 +222,7 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     - votes_against_cumulative_by_previous_ep
     - votes_against_last_3_eps
     - correct_votes_cumulative_by_previous_ep
+    - vote_accuracy_by_previous_ep
     """
     
     votes = data["Vote History"]
@@ -293,6 +294,36 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     )
 
     df = df.drop(columns=["correct_votes_ep", "_correct_cumulative"])
+
+    # Per-tribal vote accuracy: fraction of tribals attended (through previous ep)
+    # where the player voted for the person eliminated. One binary per tribal;
+    # multiple ballots in one tribal (e.g. steal-a-vote) count as correct if any match.
+    tribal_correct = (
+        votes_with_correct.groupby(["season", "episode", "castaway_id"])["is_correct"]
+        .max()
+        .rename("correct_tribal_ep")
+        .reset_index()
+    )
+    df = df.merge(tribal_correct, on=["season", "episode", "castaway_id"], how="left")
+    df["_voted_tribal_ep"] = df["correct_tribal_ep"].notna().astype(int)
+    df["correct_tribal_ep"] = df["correct_tribal_ep"].fillna(0).astype(int)
+
+    df["_correct_tribal_cum"] = df.groupby(["season", "castaway_id"])["correct_tribal_ep"].cumsum()
+    df["_voted_tribal_cum"] = df.groupby(["season", "castaway_id"])["_voted_tribal_ep"].cumsum()
+    prev_correct_tribal = (
+        df.groupby(["season", "castaway_id"])["_correct_tribal_cum"].shift(1, fill_value=0)
+    )
+    prev_voted_tribal = (
+        df.groupby(["season", "castaway_id"])["_voted_tribal_cum"].shift(1, fill_value=0)
+    )
+    df["vote_accuracy_by_previous_ep"] = (
+        prev_correct_tribal / prev_voted_tribal.replace(0, pd.NA)
+    ).fillna(0.0)
+
+    df = df.drop(columns=[
+        "correct_tribal_ep", "_voted_tribal_ep",
+        "_correct_tribal_cum", "_voted_tribal_cum",
+    ])
 
     return df
 

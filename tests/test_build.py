@@ -51,12 +51,14 @@ class TestBuildHoldingPeriods:
         assert b["start_ep"] == 9
         assert b["end_ep"] == 11
 
-    def test_found_but_never_lost_emits_no_period(self):
+    def test_found_but_never_lost_emits_open_ended_period(self):
         events = _make_events([
             (50, 1, 3, "PlayerA", "Found"),
         ])
         result = _build_holding_periods(events)
-        assert len(result) == 0
+        assert len(result) == 1
+        assert result.iloc[0]["start_ep"] == 3
+        assert result.iloc[0]["end_ep"] == float("inf")
 
     def test_unknown_event_warns_and_treated_as_neutral(self):
         events = _make_events([
@@ -100,7 +102,12 @@ class TestPipelineInvariants:
         first_eps = modeling_table.sort_values("episode").groupby(["season", "castaway_id"]).first()
         assert (first_eps["votes_against_cumulative_by_previous_ep"] == 0).all()
         assert (first_eps["correct_votes_cumulative_by_previous_ep"] == 0).all()
+        assert (first_eps["vote_accuracy_by_previous_ep"] == 0).all()
         assert (first_eps["times_in_danger"] == 0).all()
+
+    def test_vote_accuracy_in_valid_range(self, modeling_table):
+        col = "vote_accuracy_by_previous_ep"
+        assert modeling_table[col].between(0, 1).all()
 
     def test_has_advantage_is_binary(self, modeling_table):
         assert modeling_table["has_advantage"].isin([0, 1]).all()
