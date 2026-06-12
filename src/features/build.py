@@ -2,6 +2,7 @@
 
 
 import warnings
+import numpy as np
 import pandas as pd
 from src.load import load_data 
 
@@ -316,9 +317,11 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     prev_voted_tribal = (
         df.groupby(["season", "castaway_id"])["_voted_tribal_cum"].shift(1, fill_value=0)
     )
-    df["vote_accuracy_by_previous_ep"] = (
-        prev_correct_tribal / prev_voted_tribal.replace(0, pd.NA)
-    ).fillna(0.0)
+    df["vote_accuracy_by_previous_ep"] = np.where(
+        prev_voted_tribal > 0,
+        prev_correct_tribal / prev_voted_tribal,
+        0.0,
+    ).astype(float)
 
     df = df.drop(columns=[
         "correct_tribal_ep", "_voted_tribal_ep",

@@ -107,6 +107,7 @@ class TestPipelineInvariants:
 
     def test_vote_accuracy_in_valid_range(self, modeling_table):
         col = "vote_accuracy_by_previous_ep"
+        assert pd.api.types.is_float_dtype(modeling_table[col])
         assert modeling_table[col].between(0, 1).all()
 
     def test_has_advantage_is_binary(self, modeling_table):
