@@ -64,13 +64,24 @@ def _univariate_logistic_coefs(
     target_col: str = "won_season",
 ) -> dict[str, float]:
     """Standardized univariate logistic coefficients (one feature at a time)."""
+    return _partial_logistic_coefs(sub, features, control_cols=[], target_col=target_col)
+
+
+def _partial_logistic_coefs(
+    sub: pd.DataFrame,
+    features: list[str],
+    control_cols: list[str],
+    target_col: str = "won_season",
+) -> dict[str, float]:
+    """Standardized partial logistic coefs: one feature at a time + shared controls."""
     out: dict[str, float] = {}
     for feat in features:
-        valid = sub[[feat, target_col]].dropna()
+        cols = [feat, *control_cols]
+        valid = sub[cols + [target_col]].dropna()
         if len(valid) < 20 or valid[feat].std() == 0 or valid[target_col].nunique() < 2:
             out[feat] = float("nan")
             continue
-        X = StandardScaler().fit_transform(valid[[feat]])
+        X = StandardScaler().fit_transform(valid[cols])
         y = valid[target_col].values
         try:
             model = LogisticRegression(
@@ -155,6 +166,72 @@ def summarize_univariate_win_associations(
             "n_rows": int(analysis_df[feat].notna().sum()),
             "n_winner_player_seasons": int(n_winner_ps),
             "unit": unit,
+        })
+    out = pd.DataFrame(rows)
+    out["abs_coef"] = out["coef"].abs()
+    return out.sort_values("abs_coef", ascending=False, na_position="last").reset_index(drop=True)
+
+
+def summarize_stage_adjusted_win_associations(
+    df: pd.DataFrame,
+    control_cols: list[str] | None = None,
+    feature_cols: list[str] | None = None,
+    target_col: str = "won_season",
+    cluster_col: str = "season",
+    exclude_mechanical: bool = True,
+    n_boot: int = 2000,
+    ci: float = 95,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Partial feature ↔ winning associations with fixed controls (default: ``final_n``).
+
+    Each feature gets its own logistic regression with the control(s) included
+    (positive coef → higher feature values associated with winning, holding controls
+    fixed). CIs resample whole seasons. Excludes control columns from the feature list.
+    """
+    controls = list(control_cols or ["final_n"])
+    extra = UNIVARIATE_TRIBE_EXCLUDE | frozenset(controls)
+    if exclude_mechanical:
+        extra = extra | UNIVARIATE_MECHANICAL_EXCLUDE
+
+    if feature_cols is None:
+        features = modeling_feature_cols(df, exclude=extra)
+    else:
+        features = [f for f in feature_cols if f not in controls]
+
+    analysis_df = df
+
+    def stat_fn(sub: pd.DataFrame) -> dict[str, float]:
+        return _partial_logistic_coefs(
+            sub, features, control_cols=controls, target_col=target_col,
+        )
+
+    point = stat_fn(analysis_df)
+    boot = cluster_bootstrap_ci(
+        analysis_df,
+        cluster_col,
+        stat_fn,
+        n_boot=n_boot,
+        ci=ci,
+        seed=seed,
+    )
+
+    n_winner_ps = (
+        analysis_df.groupby(["season", "castaway_id"])[target_col].max().sum()
+    )
+    rows = []
+    for feat in features:
+        p = point[feat]
+        b = boot[feat]
+        rows.append({
+            "feature": feat,
+            "coef": float(p) if not np.isnan(p) else float("nan"),
+            "ci_lo": b["lo"],
+            "ci_hi": b["hi"],
+            "ci_excludes_zero": (b["lo"] > 0) or (b["hi"] < 0),
+            "n_rows": int(analysis_df[feat].notna().sum()),
+            "n_winner_player_seasons": int(n_winner_ps),
+            "controls": "+".join(controls),
         })
     out = pd.DataFrame(rows)
     out["abs_coef"] = out["coef"].abs()
