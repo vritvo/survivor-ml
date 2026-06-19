@@ -94,6 +94,7 @@ document.querySelector('#app').innerHTML = `
 const FEATURE_LABELS = {
   "age": "Age",
   "num_previous_seasons": "Previous seasons",
+  "vote_accuracy_by_previous_ep": "Vote accuracy (prior eps)",
   "votes_against_last_3_eps": "Votes against (last 3 eps)",
   "times_in_danger": "Times in danger",
   "final_n": "Players remaining",
