@@ -102,7 +102,11 @@ const FEATURE_LABELS = {
   "confessional_share_rolling_3": "Confessional share (rolling 3)",
   "mbti_feeling": "Personality: Feeling",
   "advantages_held": "Advantages held",
+  "team_immunity_wins": "Tribal immunity wins",
+  "team_immunity_rate": "Tribal immunity win rate",
   "individual_immunity_wins": "Individual immunity wins",
+  "individual_immunity_rate": "Individual immunity win rate",
+  "immunity_rate": "Immunity win rate (combined)",
 }
 
 const VIEW_DESCRIPTIONS = {

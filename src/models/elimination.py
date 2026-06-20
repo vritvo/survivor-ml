@@ -24,37 +24,37 @@ from src.models.utils import preprocess, split_by_season
 # --- Configuration ---
 
 FEATURE_COLS = [
-    # "episode", #
-    "age",
+    # "episode", 
+    "age", #
     # "age_rank", 
-    # "gender_Male", #
-    # "gender_Non-binary", #
-    # "personality_missing", #
-    # "mbti_extravert", #
-    # "mbti_intuitive", #
+    # "gender_Male", 
+    # "gender_Non-binary", 
+    # "personality_missing", 
+    # "mbti_extravert", 
+    # "mbti_intuitive", 
     # "mbti_feeling",
-    # "mbti_perceiving", #
-    # "is_returnee", #
-    "num_previous_seasons",
-    # "votes_against_cumulative_by_previous_ep", #
-    "votes_against_last_3_eps", 
-    # "correct_votes_cumulative_by_previous_ep", #
-    # "times_in_danger", #
-    # "final_n", #
-    # "tribe_status_Merged", #
-    # "tribe_status_Original", #
-    # "tribe_status_Swapped", #
-    # "tribe_status_Swapped_2", #
-    "advantages_held",
-    # "individual_immunity_wins", #
-    "individual_immunity_rate", #
-    # "immunity_rate", #
-    # "team_immunity_wins",#
-    "team_immunity_rate", #
-    # "has_advantage", #
-    # "confessional_share_last_ep", #
-    # "confessional_share_rolling_3", #
-    # "vote_accuracy_by_previous_ep", #
+    # "mbti_perceiving", 
+    # "is_returnee", 
+    "num_previous_seasons", #
+    # "votes_against_cumulative_by_previous_ep", 
+    "votes_against_last_3_eps", # 
+    # "correct_votes_cumulative_by_previous_ep", 
+    # "times_in_danger",
+    # "final_n", 
+    # "tribe_status_Merged", 
+    # "tribe_status_Original", 
+    # "tribe_status_Swapped", 
+    # "tribe_status_Swapped_2", 
+    "advantages_held", #
+    # "individual_immunity_wins", 
+    "individual_immunity_rate",  #
+    # "immunity_rate", 
+    # "team_immunity_wins",
+    "team_immunity_rate",  #
+    # "has_advantage", 
+    # "confessional_share_last_ep", 
+    # "confessional_share_rolling_3", 
+    # "vote_accuracy_by_previous_ep", 
 
 ]
 
