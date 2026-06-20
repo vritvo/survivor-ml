@@ -331,40 +331,82 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     return df
 
 
-def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Add cumulative challenge features.
+def _shifted_cumulative(df: pd.DataFrame, ep_col: str) -> pd.Series:
+    """Per-player cumulative sum of a per-episode column, lagged by one episode."""
+    return df.groupby(["season", "castaway_id"])[ep_col].transform(
+        lambda x: x.cumsum().shift(1, fill_value=0)
+    )
 
+
+def _rate_from_shifted_counts(wins: pd.Series, opps: pd.Series) -> pd.Series:
+    """Win rate from lagged cumulative wins and opportunities; 0 when no opps yet."""
+    return np.where(opps > 0, wins / opps, 0.0)
+
+
+def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Add immunity challenge features (all lagged to exclude the current episode).
+
+    Tribal (team) immunities use ``outcome_type == "Tribal"``; individual immunities
+    use ``outcome_type == "Individual"`` (including rare pre-merge individual wins).
+    Combined ``immunity_rate`` pools both win/opportunity counts.
+
+    Features:
+    - team_immunity_wins / team_immunity_rate
+    - individual_immunity_wins (count) / individual_immunity_rate
+    - immunity_rate (tribal + individual wins over tribal + individual opportunities)
     """
     cr = data["Challenge Results"]
     cr = cr[cr["version"] == "US"]
     df = skel.copy()
 
-    # Individual immunity wins per episode
-    indiv_imm = cr[
-        cr["challenge_type"].isin(["Immunity", "Immunity and Reward"])
-        & (cr["outcome_type"] == "Individual")
-        & (cr["result"] == "Won")
-    ]
-    wins_per_ep = (
-        indiv_imm.groupby(["season", "episode", "castaway_id"])
-        .size()
-        .rename("imm_wins_ep")
-        .reset_index()
-    )
+    imm = cr[cr["challenge_type"].isin(["Immunity", "Immunity and Reward"])]
+    tribal = imm[imm["outcome_type"] == "Tribal"]
+    indiv = imm[imm["outcome_type"] == "Individual"]
 
-    df = df.merge(wins_per_ep, on=["season", "episode", "castaway_id"], how="left")
-    df["imm_wins_ep"] = df["imm_wins_ep"].fillna(0).astype(int)
+    def _ep_counts(sub: pd.DataFrame, prefix: str, kind: str) -> pd.DataFrame:
+        if kind == "wins":
+            sub = sub[sub["result"] == "Won"]
+            agg = sub.groupby(["season", "episode", "castaway_id"]).size()
+        else:
+            agg = (
+                sub.groupby(["season", "episode", "castaway_id"])["challenge_id"]
+                .nunique()
+            )
+        return agg.rename(f"{prefix}_{kind}_ep").reset_index()
+
+    ep_cols = [
+        _ep_counts(tribal, "team", "wins"),
+        _ep_counts(tribal, "team", "opps"),
+        _ep_counts(indiv, "ind", "wins"),
+        _ep_counts(indiv, "ind", "opps"),
+    ]
+    for ep_df in ep_cols:
+        df = df.merge(ep_df, on=["season", "episode", "castaway_id"], how="left")
+
+    for col in ("team_wins_ep", "team_opps_ep", "ind_wins_ep", "ind_opps_ep"):
+        df[col] = df[col].fillna(0).astype(int)
 
     df = df.sort_values(["season", "castaway_id", "episode"]).reset_index(drop=True)
 
-    df["_imm_wins_cumulative"] = df.groupby(["season", "castaway_id"])["imm_wins_ep"].cumsum()
-    df["individual_immunity_wins"] = (
-        df.groupby(["season", "castaway_id"])["_imm_wins_cumulative"]
-        .shift(1, fill_value=0)
-        .astype(int)
+    df["team_immunity_wins"] = _shifted_cumulative(df, "team_wins_ep").astype(int)
+    team_opps = _shifted_cumulative(df, "team_opps_ep")
+    df["team_immunity_rate"] = _rate_from_shifted_counts(df["team_immunity_wins"], team_opps)
+
+    df["individual_immunity_wins"] = _shifted_cumulative(df, "ind_wins_ep").astype(int)
+    ind_opps = _shifted_cumulative(df, "ind_opps_ep")
+    df["individual_immunity_rate"] = _rate_from_shifted_counts(
+        df["individual_immunity_wins"], ind_opps,
     )
 
-    df = df.drop(columns=["imm_wins_ep", "_imm_wins_cumulative"])
+    total_wins = df["team_immunity_wins"] + df["individual_immunity_wins"]
+    total_opps = team_opps + ind_opps
+    df["immunity_rate"] = _rate_from_shifted_counts(total_wins, total_opps)
+
+    df = df.drop(
+        columns=[
+            "team_wins_ep", "team_opps_ep", "ind_wins_ep", "ind_opps_ep",
+        ],
+    )
 
     return df
 

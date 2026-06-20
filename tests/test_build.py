@@ -116,5 +116,24 @@ class TestPipelineInvariants:
     def test_advantages_held_non_negative(self, modeling_table):
         assert (modeling_table["advantages_held"] >= 0).all()
 
+    def test_immunity_features(self, modeling_table):
+        mt = modeling_table
+        assert (mt["team_immunity_wins"] >= 0).all()
+        assert (mt["individual_immunity_wins"] >= 0).all()
+        for col in ("team_immunity_rate", "individual_immunity_rate", "immunity_rate"):
+            assert mt[col].between(0, 1).all()
+
+        first_eps = mt.sort_values("episode").groupby(["season", "castaway_id"]).first()
+        assert (first_eps["team_immunity_wins"] == 0).all()
+        assert (first_eps["individual_immunity_wins"] == 0).all()
+        assert (first_eps["team_immunity_rate"] == 0).all()
+        assert (first_eps["individual_immunity_rate"] == 0).all()
+        assert (first_eps["immunity_rate"] == 0).all()
+
+        for col in ("team_immunity_wins", "individual_immunity_wins"):
+            for _, group in mt.groupby(["season", "castaway_id"]):
+                vals = group.sort_values("episode")[col].values
+                assert all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1))
+
     def test_target_has_no_nulls(self, modeling_table):
         assert modeling_table["eliminated_this_episode"].isna().sum() == 0
