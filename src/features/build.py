@@ -343,6 +343,117 @@ def _rate_from_shifted_counts(wins: pd.Series, opps: pd.Series) -> pd.Series:
     return np.where(opps > 0, wins / opps, 0.0)
 
 
+def _tribal_vote_key(votes: pd.DataFrame) -> pd.Series:
+    return (
+        votes["season"].astype(str) + "-"
+        + votes["episode"].astype(str) + "-"
+        + votes["day"].astype(str)
+    )
+
+
+def _votes_by_tribal_map(votes: pd.DataFrame) -> dict[str, dict[str, set[str]]]:
+    """castaway_id -> {tribal -> set(vote_id)} for non-nullified ballots."""
+    if votes.empty:
+        return {}
+    out: dict[str, dict[str, set[str]]] = {}
+    for cid, g in votes.groupby("castaway_id"):
+        by_tribal: dict[str, set[str]] = {}
+        for tribal, tg in g.groupby("tribal"):
+            by_tribal[tribal] = set(tg["vote_id"].astype(str))
+        out[cid] = by_tribal
+    return out
+
+
+def _co_vote_rate(
+    player_tribal: dict[str, set[str]],
+    juror_tribal: dict[str, set[str]],
+) -> float:
+    """Share of shared tribals where at least one vote target overlaps."""
+    shared = set(player_tribal) & set(juror_tribal)
+    if not shared:
+        return 0.0
+    matches = sum(1 for t in shared if player_tribal[t] & juror_tribal[t])
+    return matches / len(shared)
+
+
+def _jury_co_vote_score(
+    player_id: str,
+    jury_ids: list[str],
+    by_tribal: dict[str, dict[str, set[str]]],
+) -> float:
+    """Avg co-vote alignment with jury members on shared tribals."""
+    if not jury_ids:
+        return 0.0
+    co_votes = [
+        _co_vote_rate(by_tribal.get(player_id, {}), by_tribal.get(jid, {}))
+        for jid in jury_ids
+    ]
+    return float(np.mean(co_votes))
+
+
+def _pct_jury_voted_against_you(
+    player_id: str,
+    jury_ids: list[str],
+    voted_for: dict[str, set[str]],
+) -> float:
+    """Share of jury members who cast at least one vote for this player."""
+    if not jury_ids:
+        return 0.0
+    against = sum(
+        1 for jid in jury_ids
+        if str(player_id) in {str(t) for t in voted_for.get(jid, set())}
+    )
+    return against / len(jury_ids)
+
+
+def add_jury_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Jury-relationship features as-of each episode (prior episodes only).
+
+    Jury-so-far = castaways flagged ``jury`` in Castaways who were eliminated
+    before the current episode.
+
+    - ``jury_co_vote_score`` — avg co-vote alignment with current jurors
+    """
+    cast = data["Castaways"]
+    cast = cast[cast["version"] == "US"]
+    votes = data["Vote History"]
+    votes = votes[votes["version"] == "US"].dropna(subset=["vote_id"]).copy()
+    votes = votes[votes["nullified"].fillna(0) == 0]
+    votes["tribal"] = _tribal_vote_key(votes)
+
+    df = skel.copy()
+
+    elim_ep = (
+        skel.loc[skel["eliminated_this_episode"] == 1, ["season", "castaway_id", "episode"]]
+        .rename(columns={"episode": "elim_episode"})
+        .drop_duplicates(["season", "castaway_id"])
+    )
+    jury_members = cast.loc[cast["jury"] == True, ["season", "castaway_id"]]
+    jury_elim = jury_members.merge(elim_ep, on=["season", "castaway_id"], how="inner")
+
+    co_vote = np.zeros(len(df), dtype=float)
+
+    for season, sdf in df.groupby("season", sort=True):
+        season_votes = votes[votes["season"] == season]
+        season_jury = jury_elim[jury_elim["season"] == season]
+
+        for ep, edf in sdf.groupby("episode", sort=True):
+            jury_ids = season_jury.loc[
+                season_jury["elim_episode"] < ep, "castaway_id"
+            ].tolist()
+            if not jury_ids:
+                continue
+
+            v_prev = season_votes[season_votes["episode"] < ep]
+            by_tribal = _votes_by_tribal_map(v_prev)
+
+            for i, cid in zip(edf.index.to_numpy(), edf["castaway_id"]):
+                co_vote[i] = _jury_co_vote_score(cid, jury_ids, by_tribal)
+
+    df["jury_co_vote_score"] = co_vote
+    return df
+
+
 def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Add immunity challenge features (all lagged to exclude the current episode).
 
@@ -568,7 +679,8 @@ def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     df = add_challenge_features(df, data)
     df = add_confessional_features(df, data)
     df = add_advantage_features(df, data)
-    
+    df = add_jury_features(df, data)
+
     return df
     
     

@@ -107,6 +107,7 @@ const FEATURE_LABELS = {
   "individual_immunity_wins": "Individual immunity wins",
   "individual_immunity_rate": "Individual immunity win rate",
   "immunity_rate": "Immunity win rate (combined)",
+  "jury_co_vote_score": "Co-vote alignment with jury",
 }
 
 const VIEW_DESCRIPTIONS = {

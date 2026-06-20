@@ -40,7 +40,7 @@ FEATURE_COLS = [
     "num_previous_seasons", #
     # "votes_against_cumulative_by_previous_ep",
     # "votes_against_last_3_eps", 
-    # "correct_votes_cumulative_by_previous_ep",
+    # "correct_votes_cumulative_by_previous_ep", #
     "vote_accuracy_by_previous_ep",
     "times_in_danger", #
     "final_n", #
@@ -51,6 +51,7 @@ FEATURE_COLS = [
     # "advantages_held",  
     # "individual_immunity_wins",
     "has_advantage", #
+    # "jury_co_vote_score", 
     # "confessional_share_last_ep", 
     "confessional_share_rolling_3", #
     # "confessional_share_cumulative",
