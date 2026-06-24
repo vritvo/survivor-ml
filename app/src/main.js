@@ -110,8 +110,108 @@ const FEATURE_LABELS = {
   "jury_co_vote_score": "Co-vote alignment with jury",
 }
 
+// Model features that map to one display row (e.g. age + age_squared → "Age").
+const FEATURE_GROUPS = {
+  age: {
+    label: "Age",
+    members: ["age", "age_squared"],
+    displayFeature: "age",
+  },
+}
+
+const EXCLUDED_DISPLAY_FEATURES = new Set(["final_n"])
+
+function buildDisplayFeatureEntries(modelInfo) {
+  const entries = []
+  const seenGroups = new Set()
+
+  modelInfo.features.forEach((f, i) => {
+    if (EXCLUDED_DISPLAY_FEATURES.has(f)) return
+
+    let groupKey = null
+    for (const [key, grp] of Object.entries(FEATURE_GROUPS)) {
+      if (grp.members.includes(f)) {
+        groupKey = key
+        break
+      }
+    }
+
+    if (groupKey) {
+      if (seenGroups.has(groupKey)) return
+      seenGroups.add(groupKey)
+      const grp = FEATURE_GROUPS[groupKey]
+      const memberIndices = modelInfo.features
+        .map((feat, idx) => ({ feat, idx }))
+        .filter(({ feat }) => grp.members.includes(feat))
+        .map(({ idx }) => idx)
+      entries.push({
+        displayKey: groupKey,
+        label: grp.label,
+        memberIndices,
+        displayFeature: grp.displayFeature,
+      })
+    } else {
+      entries.push({
+        displayKey: f,
+        label: FEATURE_LABELS[f] || f,
+        memberIndices: [i],
+        displayFeature: f,
+      })
+    }
+  })
+
+  return entries
+}
+
+function standardizedContribution(modelInfo, memberIdx, value) {
+  const coef = modelInfo.coefficients[memberIdx]
+  const mean = modelInfo.scaler_means[memberIdx]
+  const std = modelInfo.scaler_stds[memberIdx]
+  return coef * ((value - mean) / std)
+}
+
+function combinedContribution(modelInfo, playerFeatures, memberIndices, epIdx) {
+  return memberIndices.reduce((sum, idx) => {
+    const f = modelInfo.features[idx]
+    const series = playerFeatures[f]
+    if (!series) return sum
+    const val = series[epIdx]
+    if (val == null || Number.isNaN(val)) return sum
+    return sum + standardizedContribution(modelInfo, idx, val)
+  }, 0)
+}
+
+/** Global model importance for a display row (sum of |coef| across group members). */
+function globalDisplayImportance(modelInfo, memberIndices) {
+  return memberIndices.reduce(
+    (sum, idx) => sum + Math.abs(modelInfo.coefficients[idx]),
+    0,
+  )
+}
+
+function getAgePeakYears(modelInfo) {
+  const idxAge = modelInfo.features.indexOf("age")
+  const idxSq = modelInfo.features.indexOf("age_squared")
+  if (idxAge === -1 || idxSq === -1) return null
+
+  const b1 = modelInfo.coefficients[idxAge]
+  const b2 = modelInfo.coefficients[idxSq]
+  const s1 = modelInfo.scaler_stds[idxAge]
+  const s2 = modelInfo.scaler_stds[idxSq]
+  if (b2 === 0) return null
+
+  const peak = -(b1 * s2) / (2 * b2 * s1)
+  if (!Number.isFinite(peak) || peak < 18 || peak > 75) return null
+  return Math.round(peak)
+}
+
+function ageHoverSuffix(modelInfo) {
+  const peak = getAgePeakYears(modelInfo)
+  return peak != null ? ` · model peak ~${peak} yrs` : ""
+}
+
 const VIEW_DESCRIPTIONS = {
-  bullet: "How this player compares to the field this episode. Dot position = feature value relative to other players. Green = favorable to the player; red = unfavorable.",
+  bullet: "Feature order is fixed (model importance). Bar width = how much this feature moves the score for this player; dot position = value vs the field; green/red = helps or hurts.",
   waterfall_elim: "How each feature pushes elimination risk. Green = reduces risk; red = increases it.",
   waterfall_win: "How each feature pushes win probability. Green = increases it; red = decreases it.",
 }
@@ -614,67 +714,77 @@ function getPlayerFeatureData(data, player, modelInfo, featuresKey, episode) {
   const epIdx = player.episode.indexOf(episode)
   if (epIdx === -1) return null
 
-  // Exclude final_n — identical for all players in an episode
-  const excludeFeatures = new Set(["final_n"])
-  const featureIndices = modelInfo.features
-    .map((f, i) => i)
-    .filter(i => !excludeFeatures.has(modelInfo.features[i]))
-  const features = featureIndices.map(i => modelInfo.features[i])
-  const coefficients = featureIndices.map(i => modelInfo.coefficients[i])
-  const scalerMeans = featureIndices.map(i => modelInfo.scaler_means[i])
-  const scalerStds = featureIndices.map(i => modelInfo.scaler_stds[i])
-
   const playerFeatures = player[featuresKey] || player.features
-  const playerValues = features.map(f => playerFeatures[f][epIdx])
+  const entries = buildDisplayFeatureEntries(modelInfo)
+  const features = entries.map(e => e.displayKey)
+  const labels = entries.map(e => e.label)
 
-  // Episode averages, min, max across all remaining players
+  const playerValues = entries.map(e => playerFeatures[e.displayFeature][epIdx])
+
+  // Episode averages, min, max across all remaining players (use display feature for groups)
   const episodePlayers = data.filter(p => p.episode.includes(episode))
-  const episodeAvgs = features.map(f => {
+  const episodeAvgs = entries.map(e => {
     const vals = episodePlayers.map(p => {
       const pFeats = p[featuresKey] || p.features
-      return pFeats[f][p.episode.indexOf(episode)]
+      return pFeats[e.displayFeature][p.episode.indexOf(episode)]
     })
     return vals.reduce((a, b) => a + b, 0) / vals.length
   })
-  const episodeMins = features.map(f => {
+  const episodeMins = entries.map(e => {
     const vals = episodePlayers.map(p => {
       const pFeats = p[featuresKey] || p.features
-      return pFeats[f][p.episode.indexOf(episode)]
+      return pFeats[e.displayFeature][p.episode.indexOf(episode)]
     })
     return Math.min(...vals)
   })
-  const episodeMaxs = features.map(f => {
+  const episodeMaxs = entries.map(e => {
     const vals = episodePlayers.map(p => {
       const pFeats = p[featuresKey] || p.features
-      return pFeats[f][p.episode.indexOf(episode)]
+      return pFeats[e.displayFeature][p.episode.indexOf(episode)]
     })
     return Math.max(...vals)
   })
 
-  const contributions = features.map((f, i) => {
-    const standardized = (playerValues[i] - scalerMeans[i]) / scalerStds[i]
-    return coefficients[i] * standardized
-  })
+  const contributions = entries.map(e =>
+    combinedContribution(modelInfo, playerFeatures, e.memberIndices, epIdx)
+  )
+  const globalImportance = entries.map(e =>
+    globalDisplayImportance(modelInfo, e.memberIndices)
+  )
 
-  return { features, coefficients, scalerMeans, scalerStds, playerValues, episodeAvgs, episodeMins, episodeMaxs, contributions }
+  return {
+    features,
+    labels,
+    modelInfo,
+    playerValues,
+    episodeAvgs,
+    episodeMins,
+    episodeMaxs,
+    contributions,
+    globalImportance,
+  }
 }
 
 function renderBulletChart(featureData, title, divId, higherIsBetter) {
-  const { features, playerValues, episodeAvgs, episodeMins, episodeMaxs, coefficients } = featureData
+  const {
+    labels, playerValues, episodeAvgs, episodeMins, episodeMaxs,
+    contributions, globalImportance, modelInfo, features,
+  } = featureData
 
-  const absCoefs = coefficients.map(c => Math.abs(c))
-  const maxAbsCoef = Math.max(...absCoefs)
+  const absContribs = contributions.map(c => Math.abs(c))
+  const maxAbsContrib = Math.max(...absContribs, 1e-9)
 
-  const indices = features.map((_, i) => i)
-  indices.sort((a, b) => absCoefs[b] - absCoefs[a])
+  const indices = labels.map((_, i) => i)
+  indices.sort((a, b) => globalImportance[b] - globalImportance[a])
 
-  const sortedLabels = indices.map(i => FEATURE_LABELS[features[i]] || features[i])
+  const sortedLabels = indices.map(i => labels[i])
   const sortedPlayerVals = indices.map(i => playerValues[i])
   const sortedAvgs = indices.map(i => episodeAvgs[i])
   const sortedMins = indices.map(i => episodeMins[i])
   const sortedMaxs = indices.map(i => episodeMaxs[i])
-  const sortedCoefs = indices.map(i => coefficients[i])
-  const sortedAbsCoefs = indices.map(i => absCoefs[i])
+  const sortedContributions = indices.map(i => contributions[i])
+  const sortedAbsContribs = indices.map(i => absContribs[i])
+  const sortedFeatures = indices.map(i => features[i])
 
   const shapes = []
   const dotX = []
@@ -683,7 +793,7 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
   const dotHover = []
 
   sortedLabels.forEach((label, i) => {
-    const halfWidth = 0.8 * (sortedAbsCoefs[i] / maxAbsCoef)
+    const halfWidth = 0.8 * (sortedAbsContribs[i] / maxAbsContrib)
     const range = sortedMaxs[i] - sortedMins[i]
 
     shapes.push({
@@ -714,12 +824,18 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
       }
     }
 
-    const contribution = (sortedPlayerVals[i] - sortedAvgs[i]) * sortedCoefs[i]
-    const helpsPlayer = higherIsBetter ? contribution > 0 : contribution < 0
+    const helpsPlayer = higherIsBetter
+      ? sortedContributions[i] > 0
+      : sortedContributions[i] < 0
     dotX.push(dotPos)
     dotY.push(i)
     dotColors.push(helpsPlayer ? '#3d8b6e' : '#c0604d')
-    dotHover.push(label + ': ' + sortedPlayerVals[i].toFixed(2) + ' (avg: ' + sortedAvgs[i].toFixed(2) + ')')
+    const ageSuffix = sortedFeatures[i] === "age" ? ageHoverSuffix(modelInfo) : ""
+    dotHover.push(
+      label + ': ' + sortedPlayerVals[i].toFixed(1)
+      + ' (avg: ' + sortedAvgs[i].toFixed(1) + ')'
+      + ageSuffix
+    )
   })
 
   const traces = [{
@@ -759,13 +875,20 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
 }
 
 function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter) {
-  const { features, contributions } = featureData
+  const { labels, contributions, features, modelInfo, playerValues } = featureData
 
-  const indices = features.map((_, i) => i)
+  const indices = labels.map((_, i) => i)
   indices.sort((a, b) => contributions[b] - contributions[a])
 
-  const sortedLabels = indices.map(i => FEATURE_LABELS[features[i]] || features[i])
+  const sortedLabels = indices.map(i => labels[i])
   const sortedContributions = indices.map(i => contributions[i])
+  const sortedHover = indices.map(i => {
+    let text = `${labels[i]}: ${contributions[i].toFixed(3)}`
+    if (features[i] === "age") {
+      text += ` (${playerValues[i]} yrs${ageHoverSuffix(modelInfo)})`
+    }
+    return text
+  })
   const colors = sortedContributions.map(c => {
     const helpsPlayer = higherIsBetter ? c > 0 : c < 0
     return helpsPlayer ? '#3d8b6e' : '#c0604d'
@@ -777,16 +900,18 @@ function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter)
     type: 'bar',
     orientation: 'h',
     marker: { color: colors },
-    hovertemplate: '%{y}: %{x:.3f}<extra></extra>',
+    customdata: sortedHover,
+    hovertemplate: '%{customdata}<extra></extra>',
   }]
 
   const mobile = isMobile()
+  const numFeatures = sortedLabels.length
   const layout = {
     title: { text: title, font: { size: mobile ? 12 : 17 } },
-    height: mobile ? 300 : 350,
+    height: mobile ? Math.max(300, 48 * numFeatures) : Math.max(350, 42 * numFeatures),
     xaxis: { title: { text: xLabel }, zeroline: true, zerolinewidth: 2 },
     yaxis: { automargin: true, tickfont: { size: mobile ? 10 : 12 } },
-    margin: { l: mobile ? 120 : 200, r: mobile ? 10 : 20, t: mobile ? 30 : 40, b: 40 },
+    margin: { l: mobile ? 10 : 10, r: mobile ? 24 : 32, t: mobile ? 30 : 40, b: 40 },
   }
 
   Plotly.newPlot(divId, trace, layout, { responsive: true })
@@ -850,29 +975,17 @@ function buildScorecard(data, player) {
 function renderContributionTimeline(data, player, modelInfo, featuresKey, title, divId, higherIsBetter) {
   if (!modelInfo) return
 
-  // Exclude final_n
-  const excludeFeatures = new Set(["final_n"])
-  const featureIndices = modelInfo.features
-    .map((f, i) => i)
-    .filter(i => !excludeFeatures.has(modelInfo.features[i]))
-  const features = featureIndices.map(i => modelInfo.features[i])
-  const coefficients = featureIndices.map(i => modelInfo.coefficients[i])
-  const scalerMeans = featureIndices.map(i => modelInfo.scaler_means[i])
-  const scalerStds = featureIndices.map(i => modelInfo.scaler_stds[i])
-
   const playerFeatures = player[featuresKey] || player.features
+  const entries = buildDisplayFeatureEntries(modelInfo)
 
-  // Distinct colors that are easy to tell apart
   const palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 
-  const traces = features.map((f, i) => {
-    const contributions = player.episode.map((ep, epIdx) => {
-      const val = playerFeatures[f][epIdx]
-      const standardized = (val - scalerMeans[i]) / scalerStds[i]
-      return coefficients[i] * standardized
-    })
+  const traces = entries.map((entry, i) => {
+    const contributions = player.episode.map((_, epIdx) =>
+      combinedContribution(modelInfo, playerFeatures, entry.memberIndices, epIdx)
+    )
     return {
-      name: FEATURE_LABELS[f] || f,
+      name: entry.label,
       x: player.episode,
       y: contributions,
       mode: 'lines+markers',
