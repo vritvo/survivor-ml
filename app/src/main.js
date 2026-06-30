@@ -181,8 +181,34 @@ function combinedContribution(modelInfo, playerFeatures, memberIndices, epIdx) {
   }, 0)
 }
 
-/** Global model importance for a display row (sum of |coef| across group members). */
-function globalDisplayImportance(modelInfo, memberIndices) {
+/**
+ * Comparable per-feature importance, in log-odds units.
+ *
+ * - Linear feature: |β| — log-odds change per 1 SD of the feature.
+ * - Quadratic group (e.g. age + age_squared): rewrite β_lin·z + β_sq·z² as the
+ *   curve c(d−x)², where c = β_sq / σ_sq is the raw-space curvature. The bar uses
+ *   |c|·σ_lin² = the log-odds swing for a 1-SD move away from the peak. 
+ */
+function comparableDisplayImportance(modelInfo, memberIndices) {
+  if (memberIndices.length === 1) {
+    return Math.abs(modelInfo.coefficients[memberIndices[0]])
+  }
+
+  let idxLin = null
+  let idxSq = null
+  for (const idx of memberIndices) {
+    if (modelInfo.features[idx].endsWith("_squared")) idxSq = idx
+    else idxLin = idx
+  }
+
+  if (idxLin != null && idxSq != null) {
+    const sdLin = modelInfo.scaler_stds[idxLin]
+    const sdSq = modelInfo.scaler_stds[idxSq]
+    if (sdSq === 0) return Math.abs(modelInfo.coefficients[idxLin])
+    const c = modelInfo.coefficients[idxSq] / sdSq // raw-space curvature
+    return Math.abs(c) * sdLin * sdLin
+  }
+
   return memberIndices.reduce(
     (sum, idx) => sum + Math.abs(modelInfo.coefficients[idx]),
     0,
@@ -211,7 +237,7 @@ function ageHoverSuffix(modelInfo) {
 }
 
 const VIEW_DESCRIPTIONS = {
-  bullet: "Feature order is fixed (model importance). Bar width = how much this feature moves the score for this player; dot position = value vs the field; green/red = helps or hurts.",
+  bullet: "Bar width ≈ how much the model weighs each feature overall (comparable coefficients, same for every player). Dot position = this player's value vs the rest of the cast; green/red = whether it helps or hurts them.",
   waterfall_elim: "How each feature pushes elimination risk. Green = reduces risk; red = increases it.",
   waterfall_win: "How each feature pushes win probability. Green = increases it; red = decreases it.",
 }
@@ -748,8 +774,8 @@ function getPlayerFeatureData(data, player, modelInfo, featuresKey, episode) {
   const contributions = entries.map(e =>
     combinedContribution(modelInfo, playerFeatures, e.memberIndices, epIdx)
   )
-  const globalImportance = entries.map(e =>
-    globalDisplayImportance(modelInfo, e.memberIndices)
+  const importances = entries.map(e =>
+    comparableDisplayImportance(modelInfo, e.memberIndices)
   )
 
   return {
@@ -761,21 +787,20 @@ function getPlayerFeatureData(data, player, modelInfo, featuresKey, episode) {
     episodeMins,
     episodeMaxs,
     contributions,
-    globalImportance,
+    importances,
   }
 }
 
 function renderBulletChart(featureData, title, divId, higherIsBetter) {
   const {
     labels, playerValues, episodeAvgs, episodeMins, episodeMaxs,
-    contributions, globalImportance, modelInfo, features,
+    contributions, importances, modelInfo, features,
   } = featureData
 
-  const absContribs = contributions.map(c => Math.abs(c))
-  const maxAbsContrib = Math.max(...absContribs, 1e-9)
+  const maxImportance = Math.max(...importances, 1e-9)
 
   const indices = labels.map((_, i) => i)
-  indices.sort((a, b) => globalImportance[b] - globalImportance[a])
+  indices.sort((a, b) => importances[b] - importances[a])
 
   const sortedLabels = indices.map(i => labels[i])
   const sortedPlayerVals = indices.map(i => playerValues[i])
@@ -783,7 +808,7 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
   const sortedMins = indices.map(i => episodeMins[i])
   const sortedMaxs = indices.map(i => episodeMaxs[i])
   const sortedContributions = indices.map(i => contributions[i])
-  const sortedAbsContribs = indices.map(i => absContribs[i])
+  const sortedImportances = indices.map(i => importances[i])
   const sortedFeatures = indices.map(i => features[i])
 
   const shapes = []
@@ -793,7 +818,7 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
   const dotHover = []
 
   sortedLabels.forEach((label, i) => {
-    const halfWidth = 0.8 * (sortedAbsContribs[i] / maxAbsContrib)
+    const halfWidth = 0.8 * (sortedImportances[i] / maxImportance)
     const range = sortedMaxs[i] - sortedMins[i]
 
     shapes.push({
