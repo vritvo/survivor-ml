@@ -72,9 +72,23 @@ document.querySelector('#app').innerHTML = `
             <button class="tab-btn active" data-view="bullet">Compared to field</button>
             <button class="tab-btn" data-view="waterfall">Model contributions</button>
           </div>
+          <div id="view-description-row" class="view-meta">
+            <div class="view-help" id="view-help">
+              <button type="button" class="view-help-btn" aria-label="How to read this chart" aria-expanded="false" aria-controls="view-help-popover">
+                <svg class="view-help-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.25"/>
+                  <path d="M8 7.25v3.5M8 5.5h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                How to read
+              </button>
+              <div id="view-help-popover" class="view-help-popover" role="tooltip">
+                <ul id="view-help-list"></ul>
+              </div>
+            </div>
+            <p id="view-description" class="view-description"></p>
+          </div>
         </div>
       </div>
-      <p id="view-description" class="view-description"></p>
       <div class="chart-row">
         <div id="elim-detail" class="chart" data-model="elim"></div>
         <div id="win-detail" class="chart" data-model="win"></div>
@@ -237,9 +251,50 @@ function ageHoverSuffix(modelInfo) {
 }
 
 const VIEW_DESCRIPTIONS = {
-  bullet: "Bar width ≈ how much the model weighs each feature overall (comparable coefficients, same for every player). Dot position = this player's value vs the rest of the cast; green/red = whether it helps or hurts them.",
-  waterfall_elim: "How each feature pushes elimination risk. Green = reduces risk; red = increases it.",
-  waterfall_win: "How each feature pushes win probability. Green = increases it; red = decreases it.",
+  bullet: "Green/red dot = helps or hurts this player's chances. Dot vs. center line = where they sit vs. the remaining cast.",
+  waterfall: "Each bar shows how much a feature pushes this player's score. Green = helps; red = hurts.",
+}
+
+const VIEW_HELP = {
+  bullet: [
+    "Wider bar = the model weighs that feature more.",
+    "Bar widths are fixed per feature. They don't change when you switch players; only the dots move.",
+    "Left/right of center isn't good or bad on its own, it depends on the feature.",
+    "Age on the win model follows a curve; hover the dot for approximate peak age.",
+  ],
+  waterfall: [
+    "Longer bars = bigger impact on the prediction.",
+  ],
+}
+
+function updateViewDescription(view) {
+  const key = view === "bullet" ? "bullet" : "waterfall"
+  document.getElementById("view-description").textContent = VIEW_DESCRIPTIONS[key]
+  document.getElementById("view-help-list").innerHTML = VIEW_HELP[key]
+    .map((item) => "<li>" + item + "</li>")
+    .join("")
+
+  const helpEl = document.getElementById("view-help")
+  helpEl.classList.remove("is-open")
+  helpEl.querySelector(".view-help-btn").setAttribute("aria-expanded", "false")
+}
+
+function initViewHelp() {
+  const helpEl = document.getElementById("view-help")
+  const btn = helpEl.querySelector(".view-help-btn")
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation()
+    const open = helpEl.classList.toggle("is-open")
+    btn.setAttribute("aria-expanded", open)
+  })
+
+  helpEl.addEventListener("click", (e) => e.stopPropagation())
+
+  document.addEventListener("click", () => {
+    helpEl.classList.remove("is-open")
+    btn.setAttribute("aria-expanded", "false")
+  })
 }
 
 let currentData = null
@@ -1087,25 +1142,21 @@ function renderPlayerDetail(data, castawayId, episode) {
   renderContributionTimeline(data, player, currentWinModelInfo, 'win_features', 'Win contributions — ' + player.castaway, 'win-timeline', true)
 
   const epIdx = player.episode.indexOf(episode)
-  const descEl = document.getElementById("view-description")
+  const descRowEl = document.getElementById("view-description-row")
   if (epIdx === -1) {
     const lastEp = Math.max(...player.episode)
     const placeholderMsg =
       player.castaway + ' was eliminated in Episode ' + lastEp + ',<br>' +
       'but Episode ' + episode + ' is selected.<br><br>' +
       'Choose Episode ' + lastEp + ' or earlier to see their breakdown.'
-    descEl.style.display = 'none'
+    descRowEl.style.display = 'none'
     renderDetailPlaceholder('elim-detail', 'Elimination — ' + player.castaway, placeholderMsg)
     renderDetailPlaceholder('win-detail', 'Win — ' + player.castaway, placeholderMsg)
     return
   }
 
-  descEl.style.display = ''
-  if (currentView === 'bullet') {
-    descEl.textContent = VIEW_DESCRIPTIONS.bullet
-  } else {
-    descEl.textContent = "Green = helps the player's chances; red = hurts them."
-  }
+  descRowEl.style.display = ''
+  updateViewDescription(currentView)
 
   const elimData = currentElimModelInfo
     ? getPlayerFeatureData(data, player, currentElimModelInfo, 'elim_features', episode)
@@ -1200,6 +1251,7 @@ async function init() {
   })
 
   seasonSelect.value = seasons[seasons.length - 1]
+  initViewHelp()
   loadSeason(seasonSelect.value)
 }
 
