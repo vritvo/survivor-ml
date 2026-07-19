@@ -167,6 +167,7 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     """Add time-invariant player features:
     
     - age: from Castaways (age at time of playing that season)
+    - age_squared: age^2 for non-linear age effects in linear models
     - gender: from Castaway Details (one row per unique castaway across all seasons)
     """
     castaways = data["Castaways"]
@@ -176,6 +177,7 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     # Age: join from Castaways on (season, castaway_id) since age varies per season
     age_lookup = castaways[castaways["version"] == "US"][["season", "castaway_id", "age"]].drop_duplicates()
     df = df.merge(age_lookup, on=["season", "castaway_id"], how="left")
+    df["age_squared"] = df["age"] ** 2
 
     # Gender: join from Castaway Details on castaway_id
     gender_lookup = details[["castaway_id", "gender"]].drop_duplicates()
