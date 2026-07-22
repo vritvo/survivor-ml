@@ -125,6 +125,7 @@ const FEATURE_LABELS = {
 }
 
 // Model features that map to one display row (e.g. age + age_squared → "Age").
+// Used by both win and elimination models when both terms are present.
 const FEATURE_GROUPS = {
   age: {
     label: "Age",
@@ -133,7 +134,17 @@ const FEATURE_GROUPS = {
   },
 }
 
+// Hidden from charts but may still be in modelInfo / predictions (e.g. game stage).
 const EXCLUDED_DISPLAY_FEATURES = new Set(["final_n"])
+
+/** Player feature series for charts; elim JSON omits some model inputs (e.g. final_n). */
+function resolvePlayerFeatures(player, featuresKey) {
+  const primary = player[featuresKey] || player.features || {}
+  if (featuresKey !== "elim_features" || !player.win_features) {
+    return primary
+  }
+  return { ...player.win_features, ...primary }
+}
 
 function buildDisplayFeatureEntries(modelInfo) {
   const entries = []
@@ -245,9 +256,10 @@ function getAgePeakYears(modelInfo) {
   return Math.round(peak)
 }
 
-function ageHoverSuffix(modelInfo) {
+function ageHoverSuffix(modelInfo, showPeak = true) {
+  if (!showPeak) return ""
   const peak = getAgePeakYears(modelInfo)
-  return peak != null ? ` · model peak ~${peak} yrs` : ""
+  return peak != null ? ` · sweet spot ~${peak} yrs` : ""
 }
 
 const VIEW_DESCRIPTIONS = {
@@ -260,7 +272,8 @@ const VIEW_HELP = {
     "Wider bar = the model weighs that feature more.",
     "Bar widths are fixed per feature. They don't change when you switch players; only the dots move.",
     "Left/right of center isn't good or bad on its own, it depends on the feature.",
-    "Age on the win model follows a curve; hover the dot for approximate peak age.",
+    "Age uses a curved effect (age + age²) in both models.",
+    "Elimination breakdown: votes against, advantages, individual immunity, and age (players remaining is in the model but not shown here).",
   ],
   waterfall: [
     "Longer bars = bigger impact on the prediction.",
@@ -795,7 +808,7 @@ function getPlayerFeatureData(data, player, modelInfo, featuresKey, episode) {
   const epIdx = player.episode.indexOf(episode)
   if (epIdx === -1) return null
 
-  const playerFeatures = player[featuresKey] || player.features
+  const playerFeatures = resolvePlayerFeatures(player, featuresKey)
   const entries = buildDisplayFeatureEntries(modelInfo)
   const features = entries.map(e => e.displayKey)
   const labels = entries.map(e => e.label)
@@ -806,21 +819,21 @@ function getPlayerFeatureData(data, player, modelInfo, featuresKey, episode) {
   const episodePlayers = data.filter(p => p.episode.includes(episode))
   const episodeAvgs = entries.map(e => {
     const vals = episodePlayers.map(p => {
-      const pFeats = p[featuresKey] || p.features
+      const pFeats = resolvePlayerFeatures(p, featuresKey)
       return pFeats[e.displayFeature][p.episode.indexOf(episode)]
     })
     return vals.reduce((a, b) => a + b, 0) / vals.length
   })
   const episodeMins = entries.map(e => {
     const vals = episodePlayers.map(p => {
-      const pFeats = p[featuresKey] || p.features
+      const pFeats = resolvePlayerFeatures(p, featuresKey)
       return pFeats[e.displayFeature][p.episode.indexOf(episode)]
     })
     return Math.min(...vals)
   })
   const episodeMaxs = entries.map(e => {
     const vals = episodePlayers.map(p => {
-      const pFeats = p[featuresKey] || p.features
+      const pFeats = resolvePlayerFeatures(p, featuresKey)
       return pFeats[e.displayFeature][p.episode.indexOf(episode)]
     })
     return Math.max(...vals)
@@ -910,7 +923,7 @@ function renderBulletChart(featureData, title, divId, higherIsBetter) {
     dotX.push(dotPos)
     dotY.push(i)
     dotColors.push(helpsPlayer ? '#3d8b6e' : '#c0604d')
-    const ageSuffix = sortedFeatures[i] === "age" ? ageHoverSuffix(modelInfo) : ""
+    const ageSuffix = sortedFeatures[i] === "age" ? ageHoverSuffix(modelInfo, higherIsBetter) : ""
     dotHover.push(
       label + ': ' + sortedPlayerVals[i].toFixed(1)
       + ' (avg: ' + sortedAvgs[i].toFixed(1) + ')'
@@ -965,7 +978,7 @@ function renderWaterfallChart(featureData, title, xLabel, divId, higherIsBetter)
   const sortedHover = indices.map(i => {
     let text = `${labels[i]}: ${contributions[i].toFixed(3)}`
     if (features[i] === "age") {
-      text += ` (${playerValues[i]} yrs${ageHoverSuffix(modelInfo)})`
+      text += ` (${playerValues[i]} yrs${ageHoverSuffix(modelInfo, higherIsBetter)})`
     }
     return text
   })
@@ -1055,7 +1068,7 @@ function buildScorecard(data, player) {
 function renderContributionTimeline(data, player, modelInfo, featuresKey, title, divId, higherIsBetter) {
   if (!modelInfo) return
 
-  const playerFeatures = player[featuresKey] || player.features
+  const playerFeatures = resolvePlayerFeatures(player, featuresKey)
   const entries = buildDisplayFeatureEntries(modelInfo)
 
   const palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
