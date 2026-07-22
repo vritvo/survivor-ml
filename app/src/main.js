@@ -270,10 +270,9 @@ const VIEW_DESCRIPTIONS = {
 const VIEW_HELP = {
   bullet: [
     "Wider bar = the model weighs that feature more.",
-    "Bar widths are fixed per feature. They don't change when you switch players; only the dots move.",
+    "Bar widths are fixed per feature.",
     "Left/right of center isn't good or bad on its own, it depends on the feature.",
     "Age uses a curved effect (age + age²) in both models.",
-    "Elimination breakdown: votes against, advantages, individual immunity, and age (players remaining is in the model but not shown here).",
   ],
   waterfall: [
     "Longer bars = bigger impact on the prediction.",
