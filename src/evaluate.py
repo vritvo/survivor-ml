@@ -386,6 +386,44 @@ def oob_refit_bootstrap(
     }
 
 
+def oob_coefficient_bootstrap(
+    df: pd.DataFrame,
+    train_fn: Callable[[pd.DataFrame], tuple],
+    feature_cols: list[str],
+    n_boot: int = 1000,
+    seed: int = 42,
+    verbose: bool = True,
+) -> dict:
+    """Season-resampled refit bootstrap: standardized coefficient vectors only.
+
+    Each iteration resamples whole seasons with replacement, refits once, and stores
+    the model's standardized coefficient vector. No OOB scoring — for coef stability
+    only (e.g. elimination model where winner-pick metrics do not apply).
+    """
+    rng = np.random.default_rng(seed)
+    seasons = sorted(df["season"].unique())
+    by_season = {s: g.copy() for s, g in df.groupby("season")}
+
+    coef_rows = []
+    step = max(1, n_boot // 10)
+
+    for b in range(n_boot):
+        sampled = rng.choice(seasons, size=len(seasons), replace=True)
+        train_df = pd.concat([by_season[s] for s in sampled], ignore_index=True)
+        model, _ = train_fn(train_df)
+        coef_rows.append(np.asarray(model.coef_[0], dtype=float))
+
+        if verbose and (b + 1) % step == 0:
+            print(f"  {b + 1}/{n_boot} refits")
+
+    coefficients = pd.DataFrame(coef_rows, columns=list(feature_cols))
+    return {
+        "coefficients": coefficients,
+        "n_boot": n_boot,
+        "seasons": seasons,
+    }
+
+
 def summarize_winner_picks(
     result: dict,
     df: pd.DataFrame,
@@ -426,7 +464,8 @@ def summarize_coefficient_stability(
 ) -> pd.DataFrame:
     """Aggregate bootstrap standardized coefficients into a stability table.
 
-    Uses the ``coefficients`` DataFrame from ``oob_refit_bootstrap`` (one row per
+    Uses the ``coefficients`` DataFrame from ``oob_refit_bootstrap`` or
+    ``oob_coefficient_bootstrap`` (one row per
     refit, columns = feature names). Per feature:
 
     - **median** — central standardized coefficient across refits
