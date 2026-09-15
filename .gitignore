@@ -15,6 +15,7 @@ content/.ipynb_checkpoints/
 # Data 
 /data/
 content/more_exploration.ipynb
+content/fonts/
 
 # Notes
 feature_plan.md
