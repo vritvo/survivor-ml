@@ -4,7 +4,7 @@
 import warnings
 import numpy as np
 import pandas as pd
-from src.load import load_data 
+from src.load import load_data
 
 
 # Advantage event classifications — used by _build_holding_periods
@@ -147,22 +147,22 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     )
     skel = skel.drop(columns=["_interim"])
 
-    # Build target variable "won_season" from Castaways table. 
+    # Build target variable "won_season" from Castaways table.
     won_season = us_castaways[us_castaways["winner"] == 1.0][["season", "castaway_id", "winner"]].rename(columns={"winner": "won_season"})
     skel = skel.merge(won_season, on=["season", "castaway_id"], how="left")
     skel["won_season"] = skel["won_season"].fillna(0).astype(int)
-    
+
     # Keep useful columns from the skeleton
     skel = skel[
         ["season", "episode", "castaway_id", "castaway", "tribe", "tribe_status",
          "order", "final_n", "eliminated_this_episode", "won_season"]
     ].reset_index(drop=True)
-    
+
     # One hot encode tribe_status:
     skel = pd.get_dummies(skel, columns=["tribe_status"], drop_first=True)
-    
+
     return skel
-    
+
 def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Add time-invariant player features:
     
@@ -186,13 +186,13 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     df["gender"] = df["gender"].fillna("Unknown") # If any gender is missing, set to "Unknown":
     df = pd.get_dummies(df, columns=["gender"], drop_first=True) # One hot encode gender:
 
-    # Is Returnee & Number of previous seasons: binary indicator, if theyve been in a previous season: 
+    # Is Returnee & Number of previous seasons: binary indicator, if theyve been in a previous season:
     appearances = castaways[castaways["version"] == "US"][["season", "castaway_id"]].drop_duplicates()
     appearances["season_rank"] = appearances.groupby("castaway_id")["season"].rank(method="dense")
     appearances["is_returnee"] = (appearances["season_rank"] > 1).astype(int)
     appearances["num_previous_seasons"] = (appearances['season_rank'] - 1).astype(int)
     df = df.merge(appearances[["season", "castaway_id", "is_returnee", "num_previous_seasons"]], on=["season", "castaway_id"], how="left")
-    
+
     # Personality type: split MBTI into 4 binary dimensions rather than 16 one-hot columns
     # E vs I (E = extravert, I = introvert)
     # N vs S (N = intuitive, S = sensing)
@@ -209,15 +209,15 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
         personality_lookup.drop(columns="personality_type"),
         on="castaway_id", how="left",
     )
-    
+
     # Age rank: relative age among remaining players in each episode
     df["age_rank"] = df.groupby(["season", "episode"])["age"].rank()
 
-    # Interaction effects: 
+    # Interaction effects:
     df["age_x_episode"] = df["age"] * df["episode"]
 
     return df
-    
+
 
 def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """
@@ -227,17 +227,17 @@ def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
     - correct_votes_cumulative_by_previous_ep
     - vote_accuracy_by_previous_ep
     """
-    
+
     votes = data["Vote History"]
-    
-    # limit to US: 
+
+    # limit to US:
     votes = votes[votes["version"] == "US"]
     df = skel.copy()
-    
+
     # vote_id = who the vote was cast AGAINST (the target)
     # voted_out_id = who actually went home (the result)
     # We want votes received, so group by vote_id
-    
+
     votes_clean = votes.dropna(subset=["vote_id"])  # drop rows with no vote cast (e.g. lost-vote advantage)
 
     # Votes received (against this player)
@@ -430,7 +430,7 @@ def add_jury_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.D
         .rename(columns={"episode": "elim_episode"})
         .drop_duplicates(["season", "castaway_id"])
     )
-    jury_members = cast.loc[cast["jury"] == True, ["season", "castaway_id"]]
+    jury_members = cast.loc[cast["jury"], ["season", "castaway_id"]]
     jury_elim = jury_members.merge(elim_ep, on=["season", "castaway_id"], how="inner")
 
     co_vote = np.zeros(len(df), dtype=float)
@@ -602,7 +602,7 @@ def _build_holding_periods(advantage_events: pd.DataFrame) -> pd.DataFrame:
                         "castaway_id": current_holder,
                         "start_ep": start_ep, "end_ep": row["episode"],
                     })
-                    
+
                 # If the current holder is not the same as the new holder, update the current holder and start episode
                 if current_holder != row["castaway_id"]:
                     current_holder = row["castaway_id"]
@@ -675,7 +675,7 @@ def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     Returns one row per (season, episode, player still in game) with all features
     and the target variable eliminated_this_episode."""
     skel = get_skeleton(data)
-    
+
     df = add_static_features(skel, data)
     df = add_vote_features(df, data)
     df = add_challenge_features(df, data)
@@ -684,9 +684,9 @@ def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     df = add_jury_features(df, data)
 
     return df
-    
-    
-    
+
+
+
 if __name__ == "__main__":
 
     data = load_data()
@@ -718,6 +718,6 @@ if __name__ == "__main__":
     print(f"\nVotes against (cumulative by prev ep) — mean: {df['votes_against_cumulative_by_previous_ep'].mean():.2f}, "
           f"max: {df['votes_against_cumulative_by_previous_ep'].max()}")
 
-    print(f"\nSample rows (season 20, episode 1):")
+    print("\nSample rows (season 20, episode 1):")
     print(df[(df["season"] == 20) & (df["episode"] == 1)].to_string())
 

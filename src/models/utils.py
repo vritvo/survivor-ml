@@ -3,8 +3,6 @@ Utility functions for modeling.
 """
 
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
 
 def preprocess(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
     """Prepare the modeling table for sklearn.
@@ -13,7 +11,7 @@ def preprocess(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
     """
     df = df.copy()
 
-    # Drop rows where any feature is missing 
+    # Drop rows where any feature is missing
     df = df.dropna(subset=feature_cols)
 
     return df

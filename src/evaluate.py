@@ -688,7 +688,7 @@ def expanding_window_cv(
 
     # Loop through seasons, incrementing by test_window
     while test_start <= max_season:
-        
+
         # Get the train and test seasons
         test_end = min(test_start + test_window - 1, max_season)
         train_seasons = [s for s in all_seasons if s < test_start]
@@ -703,7 +703,7 @@ def expanding_window_cv(
 
         # Run the model on the train and test data
         metrics = train_and_evaluate_fn(train_df, test_df)
-        
+
         # Add the train and test seasons to the metrics
         metrics["fold_train_seasons"] = f"1-{max(train_seasons)}"
         metrics["fold_test_seasons"] = f"{min(test_seasons)}-{max(test_seasons)}"

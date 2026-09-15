@@ -28,7 +28,7 @@ FEATURE_COLS = [
     # "episode",
     "age", #
     "age_squared", #
-    # "age_rank", 
+    # "age_rank",
     #  "age_x_episode",
     # "gender_Male",
     # "gender_Non-binary",
@@ -40,8 +40,8 @@ FEATURE_COLS = [
     # "is_returnee",
     "num_previous_seasons", #
     # "votes_against_cumulative_by_previous_ep",
-    # "votes_against_last_3_eps", 
-    # "correct_votes_cumulative_by_previous_ep", 
+    # "votes_against_last_3_eps",
+    # "correct_votes_cumulative_by_previous_ep",
     # "vote_accuracy_by_previous_ep", #
     "times_in_danger", #
     "final_n", #
@@ -49,11 +49,11 @@ FEATURE_COLS = [
     # "tribe_status_Original",
     # "tribe_status_Swapped",
     # "tribe_status_Swapped_2",
-    # "advantages_held",  
+    # "advantages_held",
     # "individual_immunity_rate",
     "has_advantage", #
-    # "jury_co_vote_score", 
-    # "confessional_share_last_ep", 
+    # "jury_co_vote_score",
+    # "confessional_share_last_ep",
     "confessional_share_rolling_3", #
     # "confessional_share_cumulative",
 ]
@@ -393,7 +393,7 @@ if __name__ == "__main__":
     group.add_argument("--select", action="store_true", help="Run forward feature selection")
     group.add_argument("--predict", type=int, metavar="SEASON",
                        help="Predict a specific season (train on all prior)")
-    
+
     args = parser.parse_args()
 
     data = load_data()

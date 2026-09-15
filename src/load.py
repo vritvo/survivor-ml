@@ -92,7 +92,7 @@ def clean_challenge_results(df: pd.DataFrame) -> pd.DataFrame:
 def clean_confessionals(df: pd.DataFrame) -> pd.DataFrame:
     """One row per castaway per episode."""
     df = df.copy()
-    
+
     # Dropped confessional_time (mostly null).
     return df[[
         "version", "version_season", "season", "episode",

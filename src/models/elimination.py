@@ -24,38 +24,38 @@ from src.models.utils import preprocess, split_by_season
 # --- Configuration ---
 
 FEATURE_COLS = [
-    # "episode", 
+    # "episode",
     "age", #
-    "age_squared", 
-    # "age_rank", 
-    # "gender_Male", 
-    # "gender_Non-binary", 
-    # "personality_missing", 
-    # "mbti_extravert", 
-    # "mbti_intuitive", 
+    "age_squared",
+    # "age_rank",
+    # "gender_Male",
+    # "gender_Non-binary",
+    # "personality_missing",
+    # "mbti_extravert",
+    # "mbti_intuitive",
     # "mbti_feeling",
-    # "mbti_perceiving", 
-    #  "is_returnee", 
+    # "mbti_perceiving",
+    #  "is_returnee",
     # "num_previous_seasons", #
-    # "votes_against_cumulative_by_previous_ep", 
-    "votes_against_last_3_eps", # 
-    # "correct_votes_cumulative_by_previous_ep", 
+    # "votes_against_cumulative_by_previous_ep",
+    "votes_against_last_3_eps", #
+    # "correct_votes_cumulative_by_previous_ep",
     #  "times_in_danger",
-     "final_n", 
-    # "tribe_status_Merged", 
-    # "tribe_status_Original", 
-    # "tribe_status_Swapped", 
-    # "tribe_status_Swapped_2", 
+     "final_n",
+    # "tribe_status_Merged",
+    # "tribe_status_Original",
+    # "tribe_status_Swapped",
+    # "tribe_status_Swapped_2",
     "advantages_held", #
-    # "individual_immunity_wins", 
+    # "individual_immunity_wins",
     "individual_immunity_rate",  #
-    #  "immunity_rate", 
+    #  "immunity_rate",
     #  "team_immunity_wins",
     # "team_immunity_rate",  #
-    #  "has_advantage", 
-    # "confessional_share_last_ep", 
-    #  "confessional_share_rolling_3", 
-    # "vote_accuracy_by_previous_ep", 
+    #  "has_advantage",
+    # "confessional_share_last_ep",
+    #  "confessional_share_rolling_3",
+    # "vote_accuracy_by_previous_ep",
 
 ]
 
@@ -219,7 +219,7 @@ def train_eval_pipeline(df: pd.DataFrame) -> dict:
     # Show which features the model relies on most
     coef_tuples = list(zip(FEATURE_COLS, model.coef_[0]))
     coef_tuples_sorted = sorted(coef_tuples, key=lambda x: abs(x[1]), reverse=True)
-    print(f"\nFeature coefficients (ordered by absolute value):")
+    print("\nFeature coefficients (ordered by absolute value):")
     for name, coef in coef_tuples_sorted:
         print(f"  {name:45s} {coef:+.4f}")
 
@@ -234,7 +234,7 @@ def cross_validate(df: pd.DataFrame) -> dict:
     df = preprocess(df, FEATURE_COLS)
 
     print(f"Features: {FEATURE_COLS}")
-    print(f"Running expanding-window CV...\n")
+    print("Running expanding-window CV...\n")
 
     cv_results = expanding_window_cv(df, _make_train_and_evaluate(feature_cols=FEATURE_COLS))
 
