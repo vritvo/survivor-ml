@@ -16,11 +16,10 @@ Usage:
 
 import argparse
 import json
-from pathlib import Path
 
 import pandas as pd
 
-from src.load import load_data
+from src.load import PROJECT_ROOT, load_data
 from src.features.build import build_modeling_table
 from src.models.utils import preprocess
 from src.models.win import (
@@ -35,6 +34,9 @@ from src.models.elimination import (
 
 # Every exported row must have non-null inputs for BOTH models.
 _ALL_NEEDED = list(set(WIN_FEATURE_COLS) | set(ELIM_FEATURE_COLS))
+
+# Where the web app reads its per-season data from.
+SEASONS_DIR = PROJECT_ROOT / "app" / "public" / "data" / "seasons"
 
 
 # --- Elimination risk scores ---
@@ -136,15 +138,13 @@ def _export_season_json(
         "players": players,
     }
 
-    project_root = Path(__file__).parent.parent
-    out_dir = project_root / "app" / "public" / "data" / "seasons"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / f"season_{target_season}.json", "w") as f:
+    SEASONS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(SEASONS_DIR / f"season_{target_season}.json", "w") as f:
         json.dump(season_data, f)
 
     # Update index of available seasons
-    seasons = sorted(int(f.stem.split("_")[1]) for f in out_dir.glob("season_*.json"))
-    with open(out_dir / "index.json", "w") as f:
+    seasons = sorted(int(f.stem.split("_")[1]) for f in SEASONS_DIR.glob("season_*.json"))
+    with open(SEASONS_DIR / "index.json", "w") as f:
         json.dump(seasons, f)
 
 

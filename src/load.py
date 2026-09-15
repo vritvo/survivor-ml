@@ -17,7 +17,8 @@ SHEETS_TO_LOAD = [
     "Tribe Mapping",
 ]
 
-DATA_PATH = Path(__file__).parent.parent / "data" / "survivoR.xlsx"
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_PATH = PROJECT_ROOT / "data" / "survivoR.xlsx"
 
 
 def load_raw(path: Path = DATA_PATH) -> dict[str, pd.DataFrame]:

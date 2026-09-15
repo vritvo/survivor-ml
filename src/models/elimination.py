@@ -68,6 +68,10 @@ TEST_SEASONS = range(41, 51)
 C = 5
 L1_RATIO = .5
 
+# saga is a stochastic solver. It shuffles samples each epoch and stops on a
+# tolerance. Pinned so exports and metrics are reproducible.
+RANDOM_STATE = 42
+
 
 # --- Training ---
 
@@ -85,6 +89,7 @@ def train_model(
 
     model = LogisticRegression(
         C=C, l1_ratio=l1_ratio, solver="saga", max_iter=5000,
+        random_state=RANDOM_STATE,
     )
     model.fit(X_train, y_train)
 

@@ -1,13 +1,11 @@
 import argparse
-from pathlib import Path
 import urllib.request
 
-from src.load import load_data
+from src.load import DATA_PATH, load_data
 from src.features.build import build_modeling_table
 from src.export import export_all_seasons
 
 DATA_URL = "https://github.com/doehm/survivoR/raw/refs/heads/master/dev/xlsx/survivoR.xlsx"
-DATA_PATH = Path("data/survivoR.xlsx")
 
 def fetch_data():
     DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
