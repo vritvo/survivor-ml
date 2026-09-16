@@ -24,37 +24,62 @@ from src.models.utils import preprocess, split_by_season
 
 # --- Configuration ---
 
+# Uncommented = deployed inputs. The order of the active entries fixes the exported coefficient order, so don't shuffle them.
+
 FEATURE_COLS = [
+    # Game stage
     # "episode",
-    "age", #
-    "age_squared", #
+
+    # Age
+    "age",
+    "age_squared",
     # "age_rank",
-    #  "age_x_episode",
+    # "age_x_episode",
+
+    # Demographics
     # "gender_Male",
     # "gender_Non-binary",
+
+    # Personality (MBTI split into four binary dimensions)
     # "personality_missing",
     # "mbti_extravert",
     # "mbti_intuitive",
     # "mbti_feeling",
     # "mbti_perceiving",
+
+    # Prior experience
     # "is_returnee",
-    "num_previous_seasons", #
+    "num_previous_seasons",
+
+    # Voting history
     # "votes_against_cumulative_by_previous_ep",
     # "votes_against_last_3_eps",
     # "correct_votes_cumulative_by_previous_ep",
-    # "vote_accuracy_by_previous_ep", #
-    "times_in_danger", #
-    "final_n", #
+    # "vote_accuracy_by_previous_ep",
+    "times_in_danger",
+
+    # Players remaining
+    "final_n",
+
+    # Tribe status
     # "tribe_status_Merged",
     # "tribe_status_Original",
     # "tribe_status_Swapped",
     # "tribe_status_Swapped_2",
+
+    # Advantages
     # "advantages_held",
+    "has_advantage",
+
+    # Immunity challenges
     # "individual_immunity_rate",
-    "has_advantage", #
+
+    # Jury relationships
     # "jury_co_vote_score",
+
+    # Confessionals / screen time
     # "confessional_share_last_ep",
-    "confessional_share_rolling_3", #
+    "confessional_share_rolling_3",
     # "confessional_share_cumulative",
 ]
 

@@ -6,8 +6,9 @@ Usage:
     python -m src.models.elimination --tune           # hyperparameter grid search
     python -m src.models.elimination --select         # forward feature selection
 
-For predicting a specific season, use predict_season(df, target_season) from code/notebook.
-
+The standalone elimination model. `predict_season(df, season)` returns
+predictions for a single season; the app's per-season JSON (which combines this model
+with the win model) is produced by `src/export.py`.
 """
 
 import argparse
@@ -23,40 +24,62 @@ from src.models.utils import preprocess, split_by_season
 
 # --- Configuration ---
 
+# Uncommented = deployed inputs. The order of the active entries fixes the exported coefficient order, so don't shuffle them.
+
 FEATURE_COLS = [
+    # Game stage
     # "episode",
-    "age", #
+
+    # Age
+    "age",
     "age_squared",
     # "age_rank",
+
+    # Demographics
     # "gender_Male",
     # "gender_Non-binary",
+
+    # Personality (MBTI split into four binary dimensions)
     # "personality_missing",
     # "mbti_extravert",
     # "mbti_intuitive",
     # "mbti_feeling",
     # "mbti_perceiving",
-    #  "is_returnee",
-    # "num_previous_seasons", #
+
+    # Prior experience
+    # "is_returnee",
+    # "num_previous_seasons",
+
+    # Voting history
     # "votes_against_cumulative_by_previous_ep",
-    "votes_against_last_3_eps", #
+    "votes_against_last_3_eps",
     # "correct_votes_cumulative_by_previous_ep",
-    #  "times_in_danger",
-     "final_n",
+    # "vote_accuracy_by_previous_ep",
+    # "times_in_danger",
+
+    # Players remaining
+    "final_n",
+
+    # Tribe status
     # "tribe_status_Merged",
     # "tribe_status_Original",
     # "tribe_status_Swapped",
     # "tribe_status_Swapped_2",
-    "advantages_held", #
-    # "individual_immunity_wins",
-    "individual_immunity_rate",  #
-    #  "immunity_rate",
-    #  "team_immunity_wins",
-    # "team_immunity_rate",  #
-    #  "has_advantage",
-    # "confessional_share_last_ep",
-    #  "confessional_share_rolling_3",
-    # "vote_accuracy_by_previous_ep",
 
+    # Advantages
+    "advantages_held",
+    # "has_advantage",
+
+    # Immunity challenges
+    # "individual_immunity_wins",
+    "individual_immunity_rate",
+    # "immunity_rate",
+    # "team_immunity_wins",
+    # "team_immunity_rate",
+
+    # Confessionals / screen time
+    # "confessional_share_last_ep",
+    # "confessional_share_rolling_3",
 ]
 
 TARGET_COL = "eliminated_this_episode"
