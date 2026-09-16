@@ -19,10 +19,6 @@ FEATURE_BIN_LABELS: dict[str, list[str]] = {
     "num_previous_seasons": ["0", "1", "2", "3+"],
 }
 
-# Backward-compatible aliases
-FEATURE_WIN_RATE_BIN_EDGES = FEATURE_BIN_EDGES
-FEATURE_WIN_RATE_BIN_LABELS = FEATURE_BIN_LABELS
-
 
 def wilson_ci(
     n_success: int,
@@ -142,21 +138,3 @@ def summarize_binned_outcome_rates(
         })
 
     return pd.DataFrame(rows)
-
-
-def summarize_binned_win_rates(
-    df: pd.DataFrame,
-    feature_col: str,
-    **kwargs,
-) -> pd.DataFrame:
-    """Alias for ``summarize_binned_outcome_rates`` with ``target_col='won_season'``."""
-    out = summarize_binned_outcome_rates(
-        df, feature_col, target_col="won_season", **kwargs,
-    )
-    if out.empty:
-        return out
-    return out.assign(
-        n_winners=out["n_positive"],
-        win_rate=out["rate"],
-        baseline_win_rate=out["baseline_rate"],
-    )

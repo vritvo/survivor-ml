@@ -393,21 +393,6 @@ def _jury_co_vote_score(
     return float(np.mean(co_votes))
 
 
-def _pct_jury_voted_against_you(
-    player_id: str,
-    jury_ids: list[str],
-    voted_for: dict[str, set[str]],
-) -> float:
-    """Share of jury members who cast at least one vote for this player."""
-    if not jury_ids:
-        return 0.0
-    against = sum(
-        1 for jid in jury_ids
-        if str(player_id) in {str(t) for t in voted_for.get(jid, set())}
-    )
-    return against / len(jury_ids)
-
-
 def add_jury_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Jury-relationship features as-of each episode (prior episodes only).
 

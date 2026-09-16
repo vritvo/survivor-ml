@@ -16,8 +16,6 @@ MODELING_TABLE_META_COLS = frozenset({
     "order",
     "eliminated_this_episode",
     "won_season",
-    "num_votes_received",
-    "votes_against_cumulative",
 })
 
 # Last-episode univariate snapshots where the feature mostly encodes "survived to
@@ -590,26 +588,6 @@ def summarize_winner_margins(finalist_frac1: pd.DataFrame) -> pd.DataFrame:
         "margin", "loso_rank", "n_finalists",
     ]
     return out[cols].sort_values("margin", ascending=False).reset_index(drop=True)
-
-
-def loso_winner_margins(
-    df: pd.DataFrame,
-    train_fn: Callable[[pd.DataFrame], tuple],
-    predict_fn: Callable[..., pd.DataFrame],
-    target_col: str = "won_season",
-    finalist_frac1: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """Single LOSO fit per season — winner margin view.
-
-    Convenience wrapper: runs `loso_finalist_frac1` (unless `finalist_frac1` is
-    passed) then `summarize_winner_margins`. Pass a precomputed `finalist_frac1`
-    to avoid refitting when building both winner and loser plots.
-    """
-    if finalist_frac1 is None:
-        finalist_frac1 = loso_finalist_frac1(
-            df, train_fn, predict_fn, target_col=target_col,
-        )
-    return summarize_winner_margins(finalist_frac1)
 
 
 def calibration_bins(
