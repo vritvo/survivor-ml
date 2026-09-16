@@ -1,6 +1,4 @@
-"""
-Reusable analysis helpers (e.g. for notebook) 
-"""
+"""Reusable analysis helpers (e.g. for notebook) """
 
 import pandas as pd
 import numpy as np

@@ -1,3 +1,13 @@
+"""Rebuild the web app's data: load the survivoR export, build the modeling
+table, and write one JSON per season for the app to read.
+
+This is what the scheduled refresh workflow runs.
+
+Usage:
+    uv run python main.py                # rebuild from the local data/survivoR.xlsx
+    uv run python main.py --fetch-data   # download the latest xlsx first
+"""
+
 import argparse
 import urllib.request
 

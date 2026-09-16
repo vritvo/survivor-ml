@@ -93,17 +93,19 @@ def _detect_interim_eliminations(bm_us: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
+def get_skeleton(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Build the skeleton: one row per (season, episode, player still in game).
-    
-    Source: Boot Mapping filtered to US + "In the game". 
-    Deduplication: episodes with multiple tribals create duplicate rows. We keep the 
-    keep the first occurrence per episode to represent the players state at the start. 
-    
-    Target: eliminated_this_episode = 1 if the player was eliminated in this episode.
-    Primary source is the Castaways table (final results). Supplemented by Boot Mapping
-    transition detection for interim eliminations (Redemption Island, Edge of Extinction,
-    Outcasts) where a player was voted out and later returned.
+
+    Source is Boot Mapping, filtered to US seasons and game_status "In the game".
+    Episodes with more than one tribal council produce duplicate rows, so we keep
+    the first occurrence per episode to represent each player's state going in.
+
+    Adds both targets:
+    - eliminated_this_episode: 1 if the player went home this episode. Taken from
+      the Castaways table (final results), supplemented by Boot Mapping transition
+      detection for interim eliminations (Redemption Island, Edge of Extinction,
+      Outcasts) where a player was voted out and later returned.
+    - won_season: 1 for the season's winner.
     """
     bm = data["Boot Mapping"]
     castaways = data["Castaways"]
@@ -158,17 +160,13 @@ def get_skeleton(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
          "order", "final_n", "eliminated_this_episode", "won_season"]
     ].reset_index(drop=True)
 
-    # One hot encode tribe_status:
     skel = pd.get_dummies(skel, columns=["tribe_status"], drop_first=True)
 
     return skel
 
+
 def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Add time-invariant player features:
-    
-    - age: from Castaways (age at time of playing that season)
-    - age_squared: age^2 for non-linear age effects in linear models
-    - gender: from Castaway Details (one row per unique castaway across all seasons)
+    """Add player features that are fixed for a given season.
     """
     castaways = data["Castaways"]
     details = data["Castaway Details"]
@@ -183,10 +181,10 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     gender_lookup = details[["castaway_id", "gender"]].drop_duplicates()
     df = df.merge(gender_lookup, on="castaway_id", how="left")
 
-    df["gender"] = df["gender"].fillna("Unknown") # If any gender is missing, set to "Unknown":
-    df = pd.get_dummies(df, columns=["gender"], drop_first=True) # One hot encode gender:
+    df["gender"] = df["gender"].fillna("Unknown")
+    df = pd.get_dummies(df, columns=["gender"], drop_first=True)
 
-    # Is Returnee & Number of previous seasons: binary indicator, if theyve been in a previous season:
+    # Rank each player's seasons to detect prior US appearances
     appearances = castaways[castaways["version"] == "US"][["season", "castaway_id"]].drop_duplicates()
     appearances["season_rank"] = appearances.groupby("castaway_id")["season"].rank(method="dense")
     appearances["is_returnee"] = (appearances["season_rank"] > 1).astype(int)
@@ -210,27 +208,24 @@ def add_static_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
         on="castaway_id", how="left",
     )
 
-    # Age rank: relative age among remaining players in each episode
     df["age_rank"] = df.groupby(["season", "episode"])["age"].rank()
-
-    # Interaction effects:
     df["age_x_episode"] = df["age"] * df["episode"]
 
     return df
 
 
 def add_vote_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    Calculates: 
-    - votes_against_cumulative_by_previous_ep
-    - votes_against_last_3_eps
-    - correct_votes_cumulative_by_previous_ep
-    - vote_accuracy_by_previous_ep
-    """
+    """Add voting-history features, all lagged to exclude the current episode.
 
+    - votes_against_cumulative_by_previous_ep: votes received so far this season
+    - votes_against_last_3_eps: votes received over the previous three episodes
+    - times_in_danger: episodes in which the player received at least one vote
+    - correct_votes_cumulative_by_previous_ep: votes cast for the player who went home
+    - vote_accuracy_by_previous_ep: share of tribals attended where the player voted
+      for the person eliminated. Multiple ballots in one tribal (e.g. steal-a-vote)
+      count as correct if any of them matched.
+    """
     votes = data["Vote History"]
-
-    # limit to US:
     votes = votes[votes["version"] == "US"]
     df = skel.copy()
 
@@ -394,12 +389,13 @@ def _jury_co_vote_score(
 
 
 def add_jury_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Jury-relationship features as-of each episode (prior episodes only).
+    """Add jury-relationship features, using prior episodes only.
 
-    Jury-so-far = castaways flagged ``jury`` in Castaways who were eliminated
-    before the current episode.
+    The jury-so-far is the set of castaways flagged as jury members in Castaways
+    who were eliminated before the current episode.
 
-    - ``jury_co_vote_score`` — avg co-vote alignment with current jurors
+    - jury_co_vote_score: average co-vote alignment with those jurors, i.e. across
+      tribals they both attended, the share where they voted for the same person
     """
     cast = data["Castaways"]
     cast = cast[cast["version"] == "US"]
@@ -509,12 +505,15 @@ def add_challenge_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) ->
     return df
 
 def add_confessional_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Add confessional / screen time features.
+    """Add confessional (screen time) features, all lagged to exclude the current episode.
 
-    feature ideas:
-    - confessionals_cumulative: total confessional count up to previous episode
-    - confessionals_last_3_eps: confessionals in the last 3 episodes (momentum)
-    - [x] confessional_share_last_ep: player's share of total confessionals in previous episode
+    Each is built from the player's share of their season's confessionals in an
+    episode rather than a raw count, so that seasons with different episode counts
+    and edit styles stay comparable.
+
+    - confessional_share_last_ep: share in the previous episode
+    - confessional_share_rolling_3: mean share over the previous three episodes
+    - confessional_share_cumulative: mean share across all previous episodes
     """
     conf = data["Confessionals"]
     conf = conf[conf["version"] == "US"]
@@ -654,11 +653,12 @@ def add_advantage_features(skel: pd.DataFrame, data: dict[str, pd.DataFrame]) ->
     return df
 
 
-def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Build the full modeling table by chaining feature functions.
-    
-    Returns one row per (season, episode, player still in game) with all features
-    and the target variable eliminated_this_episode."""
+def build_modeling_table(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Build the full modeling table by chaining the feature functions.
+
+    Returns one row per (season, episode, player still in game), with all features
+    and both targets: eliminated_this_episode and won_season.
+    """
     skel = get_skeleton(data)
 
     df = add_static_features(skel, data)
@@ -671,9 +671,7 @@ def build_modeling_table(data:dict[str, pd.DataFrame]) -> pd.DataFrame:
     return df
 
 
-
 if __name__ == "__main__":
-
     data = load_data()
     df = build_modeling_table(data)
 
@@ -695,8 +693,7 @@ if __name__ == "__main__":
 
     # Verify: static features
     print(f"\nAge — null: {df['age'].isna().sum()}, mean: {df['age'].mean():.1f}")
-    # print(f"Gender — null: {df['gender'].isna().sum()}")
-    print(f"Gender Male: {df['gender_Male'].sum()}  ")
+    print(f"Gender Male: {df['gender_Male'].sum()}")
     print(f"Gender Non-binary: {df['gender_Non-binary'].sum()}")
 
     # Verify: vote features
