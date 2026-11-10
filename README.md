@@ -23,11 +23,11 @@ uv sync
 Rebuild everything the site reads. Loads the data, builds the feature table, runs both models, writes one JSON per season:
 
 ```bash
-uv run python main.py                  # use the local data/survivoR.xlsx
-uv run python main.py --fetch-data     # download the latest spreadsheet first
+uv run python main.py                  # use the local data/json/
+uv run python main.py --fetch-data     # download the latest JSON tables first
 ```
 
- The first run needs `--fetch-data` to download the current spreadsheet into `data/`.
+ The first run needs `--fetch-data` to download the current JSON tables into `data/json/`.
 
 
 Run a single model and print its metrics:

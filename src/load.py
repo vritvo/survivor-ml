@@ -1,30 +1,41 @@
-"""Load and clean survivoR data from Excel export."""
+"""Load and clean survivoR data from the JSON export (dev/json in doehm/survivoR)."""
 
 import pandas as pd
 from pathlib import Path
 
-# Sheets to load
-SHEETS_TO_LOAD = [
-    "Castaways",
-    "Castaway Details",
-    "Episodes",
-    "Vote History",
-    "Challenge Results",
-    "Confessionals",
-    "Boot Mapping",
-    "Advantage Details",
-    "Advantage Movement",
-    "Tribe Mapping",
-]
+# Table name -> JSON file. Names match the old Excel sheet names used downstream.
+TABLES_TO_LOAD = {
+    "Castaways": "castaways.json",
+    "Castaway Details": "castaway_details.json",
+    "Episodes": "episodes.json",
+    "Vote History": "vote_history.json",
+    "Challenge Results": "challenge_results.json",
+    "Confessionals": "confessionals.json",
+    "Boot Mapping": "boot_mapping.json",
+    "Advantage Details": "advantage_details.json",
+    "Advantage Movement": "advantage_movement.json",
+    "Tribe Mapping": "tribe_mapping.json",
+}
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_PATH = PROJECT_ROOT / "data" / "survivoR.xlsx"
+DATA_DIR = PROJECT_ROOT / "data" / "json"
 
 
-def load_raw(path: Path = DATA_PATH) -> dict[str, pd.DataFrame]:
-    """Load raw sheets from Excel into a dict of DataFrames."""
-    xls = pd.ExcelFile(path)
-    return {sheet: pd.read_excel(xls, sheet_name=sheet) for sheet in SHEETS_TO_LOAD}
+def _bools_to_float(df: pd.DataFrame) -> pd.DataFrame:
+    """Turn True/False/null columns into 1.0/0.0/NaN, matching the old Excel export."""
+    for col in df.columns:
+        values = df[col].dropna()
+        if len(values) and values.map(lambda v: isinstance(v, bool)).all():
+            df[col] = df[col].map({True: 1.0, False: 0.0}).astype(float)
+    return df
+
+
+def load_raw(data_dir: Path = DATA_DIR) -> dict[str, pd.DataFrame]:
+    """Load raw tables from JSON into a dict of DataFrames."""
+    return {
+        name: _bools_to_float(pd.read_json(data_dir / filename, dtype=False, convert_dates=False))
+        for name, filename in TABLES_TO_LOAD.items()
+    }
 
 
 # --- Per-sheet cleaning functions ---
@@ -155,15 +166,15 @@ CLEANERS = {
 }
 
 
-def load_data(path: Path = DATA_PATH) -> dict[str, pd.DataFrame]:
-    """Load and clean all sheets. This is the main entry point.
+def load_data(data_dir: Path = DATA_DIR) -> dict[str, pd.DataFrame]:
+    """Load and clean all tables. This is the main entry point.
 
     Usage:
         from src.load import load_data
         data = load_data()
         votes = data["Vote History"]
     """
-    raw = load_raw(path)
+    raw = load_raw(data_dir)
     return {name: CLEANERS[name](df) for name, df in raw.items()}
 
 
